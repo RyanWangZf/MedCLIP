@@ -1,6 +1,7 @@
 import os
 from collections import defaultdict
 import pdb
+import itertools
 
 from PIL import Image
 import torch
@@ -144,8 +145,10 @@ class IUXRayImageTextCollator(IUXRayCollatorBase):
         self.is_train = is_train
 
     def __call__(self, x):
-        # x: list of dict{frontal, lateral, report}
-        # return {'input_ids': [], 'pixel_values': []}
+        '''
+        x: list of dict{frontal, lateral, report, label}
+        return {'input_ids': [], 'pixel_values': []}
+        '''
         inputs = defaultdict(list)
         text_list = []
         for data in x: # every data is a single patient
@@ -185,12 +188,53 @@ class IUXRayAbnormalNormalCollator(IUXRayCollatorBase):
         self.is_train = is_train
 
     def __call__(self, x):
-        pdb.set_trace()
-        pass
-
-
-class IUXRayFrontalLateralCollator:
-    def __init__(self):
-        '''return frontal-lateral positive pairs
         '''
-        pass
+        x: list of dict{frontal, lateral, report, label}
+        return {'pixel_values':[], 'labels':[]}
+        abnormals encodings will be saved in an momentum memory bank
+        '''
+        inputs = defaultdict(list)
+        for data in x:
+            label = 0 if data['label']=='normal' else 1
+            num_images = len(data['frontal']) + len(data['lateral'])
+            if len(data['frontal']) > 0:
+                images = self.feature_extractor(data['frontal'], return_tensors='pt')
+                inputs['pixel_values'].append(images['pixel_values'])
+            if len(data['lateral']) > 0:
+                images = self.feature_extractor(data['lateral'], return_tensors='pt')
+                inputs['pixel_values'].append(images['pixel_values'])
+            inputs['labels'].extend([label]*num_images)
+        inputs['pixel_values'] = torch.cat(inputs['pixel_values'])
+        inputs['labels'] = torch.tensor(inputs['labels'])
+        return inputs
+
+class IUXRayFrontalLateralCollator(IUXRayCollatorBase):
+    def __init__(self, feature_extractor=None, tokenizer=None, img_mean=None, img_std=None, is_train=False):
+        '''return frontal-lateral positive pairs,
+        0: frontal
+        1: lateral
+        '''
+        super().__init__(feature_extractor, tokenizer, img_mean, img_std)
+        self.is_train = is_train
+
+    def __call__(self, x):
+        '''
+        x: list of dict{frontal, lateral, report, label}
+        return {'pixel_values':[], 'labels':[]}
+        labels==0: frontal
+        labels==1: lateral
+        '''
+        inputs = defaultdict(list)
+        for data in x:
+            if len(data['frontal']) > 0:
+                images = self.feature_extractor(data['frontal'], return_tensors='pt')
+                inputs['pixel_values'].append(images['pixel_values'])
+                inputs['labels'].extend([0]*len(data['frontal']))
+            if len(data['lateral']) > 0:
+                images = self.feature_extractor(data['lateral'], return_tensors='pt')
+                inputs['pixel_values'].append(images['pixel_values'])
+                inputs['labels'].extend([1]*len(data['lateral']))
+        inputs['pixel_values'] = torch.cat(inputs['pixel_values'])
+        inputs['labels'] = torch.tensor(inputs['labels'])
+        return inputs
+

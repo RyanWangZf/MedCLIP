@@ -1,22 +1,24 @@
+import os
+import json
+import pdb
+from typing import List, Dict, Tuple, Iterable, Type, Union, Callable, Optional
+from collections import defaultdict
+
+import numpy as np
 import torch
 from torch import nn
 from torch import device, Tensor
 from sentence_transformers import LoggingHandler, SentenceTransformer, util, InputExample
-from typing import List, Dict, Tuple, Iterable, Type, Union, Callable, Optional
-from collections import defaultdict
 from sentence_transformers.evaluation import SentenceEvaluator
 from sentence_transformers.model_card_templates import ModelCardTemplate
 from sentence_transformers.util import import_from_string, batch_to_device, fullname, snapshot_download
-
 from tqdm.autonotebook import trange
-
 from torch.utils.data import DataLoader
 from torch.optim import Optimizer
 from torch import distributed as dist
 import transformers
-import json
-import numpy as np
-import pdb
+
+WEIGHTS_NAME = "pytorch_model.bin"
 
 def batch_to_device(batch, target_device: device):
     """
@@ -215,9 +217,8 @@ class Trainer:
     def train(self,
         model,
         train_objectives: Iterable[Tuple[DataLoader, nn.Module]],
-        evaluator: SentenceEvaluator = None,
+        eval_dataloader = None,
         epochs: int = 1,
-        batch_size: int = 2,
         steps_per_epoch = None,
         scheduler: str = 'WarmupLinear',
         warmup_steps: int = 10000,
@@ -235,33 +236,21 @@ class Trainer:
         checkpoint_save_steps: int = 500,
         checkpoint_save_total_limit: int = 0
         ):
+        '''
+        output_path: model save path
+        checkpoint_path: model load and continue to learn path
+        '''
         self.best_score = -9999999
         if use_amp:
             from torch.cuda.amp import autocast
             scaler = torch.cuda.amp.GradScaler()
-
-        # build sampler and dataloader based on the train_objectives
-        # datasets = [dataset for dataset,_ in train_objectives]
-        # dataloaders = []
-        # for dataset in datasets:
-        #     dataloader = torch.utils.data.DataLoader(dataset,
-        #                                  batch_size=batch_size,
-        #                                  shuffle=True,
-        #                                  num_workers=0,
-        #                                  pin_memory=False,
-        #                                  drop_last=True,
-        #         )
-        #     dataloaders.append(dataloader)
-        # for dataloader in dataloaders:
-        #     dataloader.collate_fn = model.smart_batching_collate
         
         dataloaders = [dataloader for dataloader,_ in train_objectives]
         if steps_per_epoch is None or steps_per_epoch == 0:
             steps_per_epoch = min([len(dataloader) for dataloader in dataloaders])
-
         num_train_steps = int(steps_per_epoch * epochs)
-
         loss_models = [loss for _, loss in train_objectives]
+        self.eval_dataloader = eval_dataloader
         
         # Prepare optimizers
         optimizers = []
@@ -300,6 +289,9 @@ class Trainer:
                 loss_model.train()
 
             for _ in trange(steps_per_epoch, desc="Iteration", smoothing=0.05, disable=not show_progress_bar):
+                # check if model parameters keep same
+                pdb.set_trace()
+
                 for train_idx in range(num_train_objectives):
                     loss_model = loss_models[train_idx]
                     optimizer = optimizers[train_idx]
@@ -344,23 +336,21 @@ class Trainer:
                         print('{} {:.4f} \n'.format(key, np.mean(train_loss_dict[key])))
                     train_loss_dict = defaultdict(list)
 
-                if evaluation_steps > 0 and training_steps % evaluation_steps == 0:
-                    model._eval_during_training(evaluator, output_path, save_best_model, epoch, training_steps, callback)
+                # if evaluation_steps > 0 and training_steps % evaluation_steps == 0 and self.eval_dataloader is not None:
+                #     model._eval_during_training(evaluator, output_path, save_best_model, epoch, training_steps, callback)
+                    # for loss_model in loss_models:
+                    #     loss_model.zero_grad()
+                    #     loss_model.train()
 
-                    for loss_model in loss_models:
-                        loss_model.zero_grad()
-                        loss_model.train()
+                # if checkpoint_path is not None and checkpoint_save_steps is not None and checkpoint_save_steps > 0 and global_step % checkpoint_save_steps == 0:
+                    # model._save_checkpoint(checkpoint_path, checkpoint_save_total_limit, global_step)
 
-                if checkpoint_path is not None and checkpoint_save_steps is not None and checkpoint_save_steps > 0 and global_step % checkpoint_save_steps == 0:
-                    model._save_checkpoint(checkpoint_path, checkpoint_save_total_limit, global_step)
+            # model._eval_during_training(evaluator, output_path, save_best_model, epoch, -1, callback)
 
-            model._eval_during_training(evaluator, output_path, save_best_model, epoch, -1, callback)
-
-        if evaluator is None and output_path is not None:   #No evaluator, but output path: save final model version
-            model.save(output_path)
-
-        if checkpoint_path is not None:
-            model._save_checkpoint(checkpoint_path, checkpoint_save_total_limit, global_step)
+        if eval_dataloader is None and output_path is not None:   #No evaluator, but output path: save final model version
+            state_dict = model.state_dict()
+            torch.save(state_dict, os.path.join(output_path, WEIGHTS_NAME))
+            print('model saved to', os.path.joinn(output_path, WEIGHTS_NAME))        
 
 
     @staticmethod

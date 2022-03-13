@@ -19,7 +19,13 @@ class MedCLIPModel(nn.Module):
         super().__init__()
         self.clip = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
         self.config = self.clip.config
+        # define the visual parts
         self.pixel_input_conv = nn.Conv2d(1,3,1)
+        self.vision_model = nn.Sequential(
+            self.pixel_input_conv,
+            self.clip.vision_model,
+        )
+        self.visual_projection = self.clip.visual_projection
 
     def forward(
         self,
@@ -55,14 +61,17 @@ class MedCLIPModel(nn.Module):
         # make input pixel values gray scale to RGB three channels with convolution
         pixel_values = pixel_values.to(self.clip.device).float()
         pixel_values = self.pixel_input_conv(pixel_values.unsqueeze(1))
-        attention_mask = attention_mask.to(self.clip.device)
         vision_outputs = self.clip.vision_model(
             pixel_values=pixel_values,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
             )
+        image_embeds = vision_outputs[1]
+        image_embeds = self.clip.visual_projection(image_embeds)
+
         input_ids = input_ids.to(self.clip.device)
+        attention_mask = attention_mask.to(self.clip.device)
         text_outputs = self.clip.text_model(
             input_ids=input_ids,
             attention_mask=attention_mask,
@@ -71,9 +80,6 @@ class MedCLIPModel(nn.Module):
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
             )
-        image_embeds = vision_outputs[1]
-        image_embeds = self.clip.visual_projection(image_embeds)
-
         text_embeds = text_outputs[1]
         text_embeds = self.clip.text_projection(text_embeds)
 
@@ -103,3 +109,13 @@ class MedCLIPModel(nn.Module):
             text_model_output=text_outputs,
             vision_model_output=vision_outputs,
         )
+
+    def encode_image(self,pixel_values=None,normalize=True):
+        '''receive pixel values, extract the image features
+        '''
+        pixel_values = pixel_values.to(self.clip.device).float()
+        vision_outputs = self.vision_model(pixel_values.unsqueeze(1))
+        image_embeds = vision_outputs[1]
+        image_embeds = self.clip.visual_projection(image_embeds)
+        if normalize: image_embeds = image_embeds / image_embeds.norm(dim=-1, keepdim=True)
+        return image_embeds
