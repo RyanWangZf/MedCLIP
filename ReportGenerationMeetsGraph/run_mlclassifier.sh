@@ -1,5 +1,7 @@
 #! /usr/bin/env bash
 
+export PYTHONPATH=$(pwd)
+
 python train_mlclassifier.py \
   --name mlclassifier_ones3_t012v3t4_lr1e-6 \
   --pretrained ./weights/model_ones_3epoch_densenet.tar \
