@@ -19,20 +19,20 @@ from sklearn.metrics import precision_recall_fscore_support, roc_auc_score
 def get_args():
     parser = argparse.ArgumentParser()
 
-    parser.add_argument('--name', type=str, required=True)
-    parser.add_argument('--model-path', type=str, default='/workspace/biview/models')
-    parser.add_argument('--pretrained', type=str, default='/workspace/biview/models/pretrained/model_ones_3epoch_densenet.tar')
+    parser.add_argument('--name', type=str, default='dev')
+    parser.add_argument('--model-path', type=str, default='./output/models')
+    parser.add_argument('--pretrained', type=str, default='./weights/model_ones_3epoch_densenet.tar')
     parser.add_argument('--checkpoint', type=str, default='')
-    parser.add_argument('--dataset-dir', type=str, default='/workspace/biview')
+    parser.add_argument('--dataset-dir', type=str, default='./data')
     parser.add_argument('--train-folds', type=str, default='012')
     parser.add_argument('--val-folds', type=str, default='3')
     parser.add_argument('--test-folds', type=str, default='4')
-    parser.add_argument('--report-path', type=str, default='/datasets/reports.json')
-    parser.add_argument('--vocab-path', type=str, default='/datasets/vocab.pkl')
-    parser.add_argument('--label-path', type=str, default='/datasets/biview/label_dict.json')
-    parser.add_argument('--log-path', type=str, default='/workspace/biview/logs')
+    parser.add_argument('--report-path', type=str, default='./data/reports.json')
+    parser.add_argument('--vocab-path', type=str, default='./data/vocab.pkl')
+    parser.add_argument('--label-path', type=str, default='./data/label_dict.json')
+    parser.add_argument('--log-path', type=str, default='./output/logs')
     parser.add_argument('--log-freq', type=int, default=1)
-    parser.add_argument('--num-epochs', type=int, default=100)
+    parser.add_argument('--num-epochs', type=int, default=150)
     parser.add_argument('--seed', type=int, default=123)
     parser.add_argument('--lr', type=float, default=1e-6)
     parser.add_argument('--batch-size', type=int, default=8)
@@ -57,13 +57,13 @@ if __name__ == '__main__':
     for k, v in vars(args).items():
         logging.info('{}: {}'.format(k, v))
 
-    writer = SummaryWriter(log_dir=os.path.join('/workspace/biview/runs', args.name))
+    writer = SummaryWriter(log_dir=os.path.join('./output/runs', args.name))
 
     device = torch.device('cuda:{}'.format(args.gpus[0]) if torch.cuda.is_available() else 'cpu')
     gpus = [int(_) for _ in list(args.gpus)]
     torch.manual_seed(args.seed)
 
-    with open('/datasets/biview/19class_keywords.txt') as f:
+    with open('./data/19class_keywords.txt') as f:
         keywords = f.read().splitlines()
     keywords.append('other')
 
@@ -101,7 +101,7 @@ if __name__ == '__main__':
 
     model = GCNClassifier(args.num_classes, fw_adj, bw_adj).to(device)
     if args.pretrained != '':
-        checkpoint = torch.load(args.pretrained)
+        checkpoint = torch.load(args.pretrained, map_location=torch.device(device))
         pretrained_state_dict = checkpoint['state_dict']
         model_state_dict = model.state_dict()
         model_state_dict.update({k[7:]: v for k, v in pretrained_state_dict.items() if k[7:] in model_state_dict})
@@ -176,9 +176,9 @@ if __name__ == '__main__':
             roc_auc = roc_auc_score(y, y_score, average=None)
             print('Epoch {}/{}, P {:.4f}, R {:.4f}, F {:.4f}, AUC {:.4f}'.format(
                 epoch, args.num_epochs, precision.mean(), recall.mean(), f.mean(), roc_auc.mean()))
-            writer.add_scalar('precision', precision[:10].mean(), epoch)
-            writer.add_scalar('recall', recall[:10].mean(), epoch)
-            writer.add_scalar('f', f[:10].mean(), epoch)
+            writer.add_scalar('precision', precision.mean(), epoch)
+            writer.add_scalar('recall', recall.mean(), epoch)
+            writer.add_scalar('f', f.mean(), epoch)
             writer.add_scalar('auc', roc_auc.mean(), epoch)
 
             # test
@@ -201,7 +201,7 @@ if __name__ == '__main__':
             df = np.stack([p, r, f, roc_auc], axis=1)
             df = pd.DataFrame(df, columns=['precision', 'recall', 'f1', 'auc'])
             df.insert(0, 'name', keywords)
-            df.to_csv(os.path.join('/workspace/biview/output', args.name + '_e{}.csv'.format(epoch)))
+            df.to_csv(os.path.join('./output/predictions', args.name + '_e{}.csv'.format(epoch)))
 
 
     writer.close()

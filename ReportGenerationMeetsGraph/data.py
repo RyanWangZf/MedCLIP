@@ -29,6 +29,8 @@ class Biview_Classification(Dataset):
 
     def __getitem__(self, idx):
         caseid, img1_path, img2_path = self.case_list[idx].split()
+        img1_path = os.path.join('./data/NLMCXR_pngs', img1_path)
+        img2_path = os.path.join('./data/NLMCXR_pngs', img2_path)
         image1 = Image.open(img1_path)
         image1 = self.transform(image1)
         image2 = Image.open(img2_path)

@@ -134,11 +134,11 @@ class GCNClassifier(nn.Module):
         node_states1 = self.gcn(node_feats1, fw_A, bw_A)
         node_states2 = self.gcn(node_feats2, fw_A, bw_A)
         # v1:
-        logits = img1.new_zeros((batch_size, self.num_classes), dtype=torch.float)
-        for c in range(self.num_classes):
-            logits[:, c] = self.fcs[c](node_states1[:, c+1] + node_states2[:, c+1]).squeeze(1)
-        return logits
-        # v2:
-        # global_states = node_states1.mean(dim=1) + node_states2.mean(dim=1)
-        # logits = self.fc2(global_states)
+        # logits = img1.new_zeros((batch_size, self.num_classes), dtype=torch.float)
+        # for c in range(self.num_classes):
+        #     logits[:, c] = self.fcs[c](node_states1[:, c+1] + node_states2[:, c+1]).squeeze(1)
         # return logits
+        # v2:
+        global_states = node_states1.mean(dim=1) + node_states2.mean(dim=1)
+        logits = self.fc2(global_states)
+        return logits
