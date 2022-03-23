@@ -28,7 +28,7 @@ class Vocabulary(object):
 
 
 if __name__ == '__main__':
-    with open('/home/dlmed3/openi/reports.json') as f:
+    with open('./data/reports.json') as f:
         reports = json.load(f)
     counter = Counter()
     for caseid, report in reports.items():
@@ -59,7 +59,7 @@ if __name__ == '__main__':
     for word in words:
         vocab.add_word(word)
 
-    with open('vocab.pkl', 'wb') as f:
+    with open('./data/vocab.pkl', 'wb') as f:
         pickle.dump(vocab, f)
 
-    print('Total vocabulary size {}. Saved to {}'.format(len(vocab), 'mimic_vocab.pkl'))
+    print('Total vocabulary size {}. Saved to {}'.format(len(vocab), './data/vocab.pkl'))
