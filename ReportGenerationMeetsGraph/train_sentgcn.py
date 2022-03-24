@@ -17,19 +17,19 @@ from torch.utils.tensorboard.writer import SummaryWriter
 def get_args():
     parser = argparse.ArgumentParser()
 
-    parser.add_argument('--name', type=str, required=True)
-    parser.add_argument('--model-dir', type=str, default='/workspace/paper/models')
-    parser.add_argument('--output-dir', type=str, default='/workspace/paper/output')
-    parser.add_argument('--pretrained', type=str, default='/workspace/paper/models/mlclassifier_ones3_t012v3t4_lr1e-6_e95.pth')
+    parser.add_argument('--name', type=str, default='dev')
+    parser.add_argument('--model-dir', type=str, default='./output/models')
+    parser.add_argument('--output-dir', type=str, default='./output/predictions')
+    parser.add_argument('--pretrained', type=str, default='')
     parser.add_argument('--checkpoint', type=str, default='')
-    parser.add_argument('--dataset-dir', type=str, default='/workspace/paper')
+    parser.add_argument('--dataset-dir', type=str, default='./data')
     parser.add_argument('--train-folds', type=str, default='012')
     parser.add_argument('--val-folds', type=str, default='3')
     parser.add_argument('--test-folds', type=str, default='4')
-    parser.add_argument('--report-path', type=str, default='/datasets/reports.json')
-    parser.add_argument('--vocab-path', type=str, default='/datasets/vocab.pkl')
-    parser.add_argument('--label-path', type=str, default='/datasets/biview/label_dict.json')
-    parser.add_argument('--log-dir', type=str, default='/workspace/paper/logs')
+    parser.add_argument('--report-path', type=str, default='./data/reports.json')
+    parser.add_argument('--vocab-path', type=str, default='./data/vocab.pkl')
+    parser.add_argument('--label-path', type=str, default='./data/label_dict.json')
+    parser.add_argument('--log-dir', type=str, default='./output/logs')
     parser.add_argument('--log-freq', type=int, default=1)
     parser.add_argument('--num-epochs', type=int, default=100)
     parser.add_argument('--seed', type=int, default=123)
@@ -58,7 +58,7 @@ if __name__ == '__main__':
     for k, v in vars(args).items():
         logging.info('{}: {}'.format(k, v))
 
-    writer = SummaryWriter(log_dir=os.path.join('/workspace/paper/runs', args.name))
+    writer = SummaryWriter(log_dir=os.path.join('./output/runs', args.name))
 
     gpus = [int(_) for _ in list(args.gpus)]
     device = torch.device('cuda:{}'.format(gpus[0]) if torch.cuda.is_available() else 'cpu')
@@ -204,6 +204,7 @@ if __name__ == '__main__':
                         if w == '<start>' or w == '<pad>':
                             continue
                         if w == '<end>':
+                            # TODO (zw): this won't end the sentence
                             break
                         words.append(w)
                     val_res[caseid][0] += ' '.join(words)
@@ -249,6 +250,7 @@ if __name__ == '__main__':
                         if w == '<start>' or w == '<pad>':
                             continue
                         if w == '<end>':
+                            # TODO (zw): this won't end the sentence
                             break
                         words.append(w)
                     test_res[caseid][0] += ' '.join(words)
