@@ -1,0 +1,19 @@
+normal / no indexing
+cardiomegaly
+scoliosis / degenerative
+fractures bone
+pleural effusion
+thickening
+pneumothorax
+hernia hiatal
+calcinosis
+emphysema / pulmonary emphysema
+pneumonia / infiltrate / consolidation
+pulmonary edema
+pulmonary atelectasis
+cicatrix
+opacity
+nodule / mass
+airspace disease
+hypoinflation / hyperdistention
+catheters indwelling / surgical instruments / tube inserted / medical device
