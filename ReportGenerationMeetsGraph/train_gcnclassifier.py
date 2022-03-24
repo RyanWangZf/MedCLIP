@@ -201,6 +201,7 @@ if __name__ == '__main__':
             df = np.stack([p, r, f, roc_auc], axis=1)
             df = pd.DataFrame(df, columns=['precision', 'recall', 'f1', 'auc'])
             df.insert(0, 'name', keywords)
+            os.makedirs('./output/predictions', exist_ok=True)
             df.to_csv(os.path.join('./output/predictions', args.name + '_e{}.csv'.format(epoch)))
 
 
