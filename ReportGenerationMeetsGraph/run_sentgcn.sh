@@ -1,4 +1,9 @@
 #! /usr/bin/env bash
+
+# TODO (zw): need to be updated
+
+export PYTHONPATH=$(pwd)
+
 python /workspace/paper/train_sentgcn.py --name sentgcn_t401v2t3_pree80_lr1e-4_ctx --pretrained /workspace/biview/models/gcnclassifier_v2_ones3_t401v2t3_lr1e-6_e80.pth --train-folds 401 --val-folds 2 --test-folds 3 --gpus 0 --batch-size 8 --decoder-lr 1e-4 --vocab-path /datasets/vocab.pkl
 
 python /workspace/paper/train_sentgcn.py --name sentgcn_t340v1t2_pree77_lr1e-4_ctx --pretrained /workspace/biview/models/gcnclassifier_v2_ones3_t340v1t2_lr1e-6_e77.pth --train-folds 340 --val-folds 1 --test-folds 2 --gpus 0 --batch-size 8 --decoder-lr 1e-4 --vocab-path /datasets/vocab.pkl
