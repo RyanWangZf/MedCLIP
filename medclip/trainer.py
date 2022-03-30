@@ -245,7 +245,7 @@ class Trainer:
             from torch.cuda.amp import autocast
             scaler = torch.cuda.amp.GradScaler()
         
-        self.score_logs = []
+        self.score_logs = {}
         self.evaluator = evaluator
         self.eval_dataloader = eval_dataloader
 

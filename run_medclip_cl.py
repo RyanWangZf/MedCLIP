@@ -45,7 +45,6 @@ momentum_model = momentum_model.to(device)
 # #########
 # define the evaluator
 # #########
-model.load_state_dict(torch.load('./checkpoints/pytorch_model.bin'))
 eval_data = IUXRayDataset('./data/IU_XRay', 'val')
 collate_fn = IUXRayImageTextCollator(img_mean=eval_data.img_mean, img_std=eval_data.img_std, is_train=False)
 eval_dataloader = DataLoader(eval_data, batch_size=train_config['eval_batch_size'], shuffle=False, collate_fn=collate_fn)
