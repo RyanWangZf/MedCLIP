@@ -218,6 +218,7 @@ class Trainer:
         model,
         train_objectives: Iterable[Tuple[DataLoader, nn.Module]],
         eval_dataloader = None,
+        evaluator=None,
         epochs: int = 1,
         steps_per_epoch = None,
         scheduler: str = 'WarmupLinear',
@@ -233,7 +234,6 @@ class Trainer:
         callback: Callable[[float, int, int], None] = None,
         show_progress_bar: bool = True,
         checkpoint_path: str = None,
-        checkpoint_save_steps: int = 500,
         checkpoint_save_total_limit: int = 0
         ):
         '''
@@ -245,12 +245,15 @@ class Trainer:
             from torch.cuda.amp import autocast
             scaler = torch.cuda.amp.GradScaler()
         
+        self.score_logs = []
+        self.evaluator = evaluator
+        self.eval_dataloader = eval_dataloader
+
         dataloaders = [dataloader for dataloader,_ in train_objectives]
         if steps_per_epoch is None or steps_per_epoch == 0:
             steps_per_epoch = min([len(dataloader) for dataloader in dataloaders])
         num_train_steps = int(steps_per_epoch * epochs)
         loss_models = [loss for _, loss in train_objectives]
-        self.eval_dataloader = eval_dataloader
         
         # Prepare optimizers
         optimizers = []
@@ -290,7 +293,6 @@ class Trainer:
 
             for _ in trange(steps_per_epoch, desc="Iteration", smoothing=0.05, disable=not show_progress_bar):
                 # check if model parameters keep same
-                pdb.set_trace()
 
                 for train_idx in range(num_train_objectives):
                     loss_model = loss_models[train_idx]
@@ -336,22 +338,33 @@ class Trainer:
                         print('{} {:.4f} \n'.format(key, np.mean(train_loss_dict[key])))
                     train_loss_dict = defaultdict(list)
 
-                # if evaluation_steps > 0 and training_steps % evaluation_steps == 0 and self.eval_dataloader is not None:
-                #     model._eval_during_training(evaluator, output_path, save_best_model, epoch, training_steps, callback)
-                    # for loss_model in loss_models:
-                    #     loss_model.zero_grad()
-                    #     loss_model.train()
+                if evaluation_steps > 0 and global_step % evaluation_steps == 0 and self.evaluator is not None:
+                    self.evaluator.update_sentence_memory()
+                    scores = self.evaluator.evaluate()
+                    print(f'######### Eval {global_step} #########')
+                    for key in scores.keys(): print('{}: {:.4f}'.format(key, scores[key]))
+                    self.score_logs[global_step] = scores['ROUGE_L']
+                    state_dict = model.state_dict()
+                    torch.save(state_dict, os.path.join(
+                        os.path.join(output_path,f'{global_step}/'),
+                        WEIGHTS_NAME))
 
-                # if checkpoint_path is not None and checkpoint_save_steps is not None and checkpoint_save_steps > 0 and global_step % checkpoint_save_steps == 0:
-                    # model._save_checkpoint(checkpoint_path, checkpoint_save_total_limit, global_step)
-
-            # model._eval_during_training(evaluator, output_path, save_best_model, epoch, -1, callback)
+        if save_best_model:
+            import pandas as pd
+            from distutils.dir_util import copy_tree
+            res = pd.Series(self.score_logs)
+            best_iter = res.index(res.argmax())
+            best_score = res.max()
+            best_save_path = os.path.join(output_path, './best')
+            best_origin_path = os.path.join(output_path, f'./{best_iter}')
+            print(f'save best checkpoint at iter {best_iter} [ROUGE_L] {best_score} to', 
+                best_save_path)
+            copy_tree(best_origin_path,best_save_path)
 
         if eval_dataloader is None and output_path is not None:   #No evaluator, but output path: save final model version
             state_dict = model.state_dict()
             torch.save(state_dict, os.path.join(output_path, WEIGHTS_NAME))
-            print('model saved to', os.path.joinn(output_path, WEIGHTS_NAME))        
-
+            print('model saved to', os.path.join(output_path, WEIGHTS_NAME))
 
     @staticmethod
     def _get_scheduler(optimizer, scheduler: str, warmup_steps: int, t_total: int):

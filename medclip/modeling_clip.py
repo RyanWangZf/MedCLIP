@@ -1,9 +1,11 @@
+import pdb
+import os
+
 from transformers import CLIPProcessor, CLIPModel
 from transformers.models.clip.modeling_clip import CLIPOutput
 import torch
 from torch import nn
 
-import pdb
 
 # contrastive loss function, adapted from
 # https://sachinruk.github.io/blog/pytorch/pytorch%20lightning/loss%20function/gpu/2021/03/07/CLIP.html
@@ -15,9 +17,19 @@ def clip_loss(similarity: torch.Tensor) -> torch.Tensor:
     return (caption_loss + image_loss) / 2.0
 
 class MedCLIPModel(nn.Module):
-    def __init__(self):
+    def __init__(self, load_dir=None):
         super().__init__()
-        self.clip = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
+        if load_dir is not None:
+            if not os.path.exists(load_dir):
+                print(f'no pretrained model found in {load_dir}, load from Huggingface')
+                self.clip = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
+            else:
+                print(f'load pretrained MedClip from local dir {load_dir}')
+                self.clip = CLIPModel.from_pretrained(load_dir)
+        else:
+            print('initialize medclip with CLIP from huggingface')
+            self.clip = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
+
         self.config = self.clip.config
         # define the visual parts
         self.pixel_input_conv = nn.Conv2d(1,3,1)
@@ -110,7 +122,7 @@ class MedCLIPModel(nn.Module):
             vision_model_output=vision_outputs,
         )
 
-    def encode_image(self,pixel_values=None,normalize=True):
+    def encode_image(self, pixel_values=None, normalize=True):
         '''receive pixel values, extract the image features
         '''
         pixel_values = pixel_values.to(self.clip.device).float()
@@ -119,3 +131,12 @@ class MedCLIPModel(nn.Module):
         image_embeds = self.clip.visual_projection(image_embeds)
         if normalize: image_embeds = image_embeds / image_embeds.norm(dim=-1, keepdim=True)
         return image_embeds
+    
+    def encode_text(self, input_ids=None, attention_mask=None, normalize=True):
+        '''receive tokenized texts, extract the text features
+        '''
+        input_ids = input_ids.to(self.clip.device)
+        attention_mask = attention_mask.to(self.clip.device)
+        text_embeds = self.clip.text_model(input_ids=input_ids, attention_mask=attention_mask)['pooler_output']
+        if normalize: text_embeds = text_embeds / text_embeds.norm(dim=-1, keepdim=True)
+        return text_embeds

@@ -22,10 +22,13 @@ class IUXRayDataset(Dataset):
     channel_num = 1 # XRay is a gray scale image
     img_mean = [0.5862785803043838]
     img_std = [0.27950088968644304]
-    def __init__(self, datadir):
+    def __init__(self, datadir, mode=None):
+        
+        assert mode in ['train','test','val']
         self.image_dir = os.path.join(datadir, './images/images_normalized')
-        reports = pd.read_csv(os.path.join(datadir, 'indiana_reports.csv'), index_col=0)
         projection = pd.read_csv(os.path.join(datadir, 'indiana_projections.csv'), index_col=0)
+        reports = pd.read_csv(os.path.join(datadir, f'./{mode}/indiana_reports.csv'), index_col=0)
+
         # drop NaN findings and impressions
         not_null_idx = ~(reports['findings'].isnull() * reports['impression'].isnull())
         reports = reports[not_null_idx][self._report_sections_]
@@ -99,7 +102,45 @@ class IUXRayDataset(Dataset):
         for filename in self.uid2lateral[uid]:
             x_image = Image.open(filename)
             l_list.append(x_image)
+
+        if len(f_list) == 0 and len(l_list) == 0:
+            pdb.set_trace()
+            pass
         return {'frontal': f_list, 'lateral': l_list, 'report': report_str, 'label': report['MeSH']}
+
+class IUXRaySentenceDataset(Dataset):
+    def __init__(self, datadir):
+        import json
+        self.datadir = datadir
+        self.file_path = os.path.join(datadir, 'sentence_dict.txt')
+        if not os.path.exists(self.file_path):
+            print('no sentence file found, start to process')
+            self._process()
+        with open(self.file_path, 'r') as f:
+            sent_dict = json.loads(f.read())
+        self.sent_ts = pd.Series(sent_dict)
+
+    def __len__(self):
+        return len(self.sent_ts)
+
+    def __getitem__(self, idx):
+        sent = self.sent_ts.index[idx]
+        return sent
+
+    def _process(self):
+        from tqdm import tqdm
+        import json
+        df = pd.read_csv(os.path.join(self.datadir,'indiana_reports.csv'))
+        df_reports = df[['findings','impression']]
+        df_reports.fillna('', inplace=True)
+        df_sentences = df_reports.applymap(lambda x: x.split('.'))
+        all_sent_dict = defaultdict(int)
+        for sample in tqdm(df_sentences.values):
+            for sent_list in sample:
+                for sent in sent_list:
+                    if len(sent)>0: all_sent_dict[sent.strip().lower()]+=1     
+        with open(self.file_path,'w') as f:
+            f.write(json.dumps(all_sent_dict))
 
 # ########
 # Three collators for three contrastive loss computation
@@ -111,8 +152,14 @@ class IUXRayCollatorBase:
         img_mean=None,
         img_std=None,
         max_text_length=77,
+        set_tokenizer=True,
+        set_feature_extractor=True,
         ):
-        if feature_extractor is None:
+        '''args:
+        set_tokenizer: set True if need tokenizer
+        set_feature_extractor: set True if need image feature extractor
+        '''
+        if feature_extractor is None and set_feature_extractor:
             assert img_mean is not None
             assert img_std is not None
             self.feature_extractor = MedCLIPFeatureExtractor(
@@ -127,8 +174,15 @@ class IUXRayCollatorBase:
             )
         else:
             self.feature_extractor = feature_extractor
-        if tokenizer is None:
+
+        if tokenizer is None and set_tokenizer:
             self.tokenizer = CLIPTokenizer.from_pretrained('openai/clip-vit-base-patch32')
+        elif isinstance(tokenizer, str):
+            if os.path.exists(tokenizer):
+                self.tokenizer = CLIPTokenizer.from_pretrained(tokenizer)
+            else:
+                self.tokenizer = CLIPTokenizer.from_pretrained('openai/clip-vit-base-patch32')
+                self.tokenizer.save_pretrained(tokenizer)
         else:
             self.tokenizer = tokenizer
         
@@ -147,7 +201,7 @@ class IUXRayImageTextCollator(IUXRayCollatorBase):
     def __call__(self, x):
         '''
         x: list of dict{frontal, lateral, report, label}
-        return {'input_ids': [], 'pixel_values': []}
+        return {'input_ids': [], 'pixel_values': [], 'attention_mask':[], 'report':[]}
         '''
         inputs = defaultdict(list)
         text_list = []
@@ -163,10 +217,15 @@ class IUXRayImageTextCollator(IUXRayCollatorBase):
                 inputs['pixel_values'].append(images['pixel_values'])
                 text_list.extend([report] * len(data['lateral']))
         # tokenize texts together
-        text_token_ids = self.tokenizer(text_list, return_tensors='pt', padding=True, truncation=True)
+        try:
+            text_token_ids = self.tokenizer(text_list, return_tensors='pt', padding=True, truncation=True)
+        except:
+            pdb.set_trace()
+
         for key in text_token_ids.keys():
             inputs[key] = text_token_ids[key]
         inputs['pixel_values'] = torch.cat(inputs['pixel_values'])
+        if not self.is_train: inputs['report'] = text_list
         return inputs
 
     def _text_random_cut_(self, text):
@@ -238,3 +297,16 @@ class IUXRayFrontalLateralCollator(IUXRayCollatorBase):
         inputs['labels'] = torch.tensor(inputs['labels'])
         return inputs
 
+class IUXRayTextCollator(IUXRayCollatorBase):
+    def __init__(self, tokenizer='./medclip/cliptokenizer'):
+        super().__init__(tokenizer=tokenizer, set_feature_extractor=False)
+    
+    def __call__(self, x):
+        '''
+        x: list of sentences
+        '''
+        output = self.tokenizer(x, padding=True, truncation=True, return_tensors='pt')
+        output['sentence'] = x
+        return output
+
+        

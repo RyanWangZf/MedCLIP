@@ -1,0 +1,1 @@
+nohup python -u run_medclip_cl.py > train.log &
