@@ -343,11 +343,9 @@ class Trainer:
                     scores = self.evaluator.evaluate()
                     print(f'######### Eval {global_step} #########')
                     for key in scores.keys(): print('{}: {:.4f}'.format(key, scores[key]))
+                    save_dir =  os.path.join(output_path, f'{global_step}/')
+                    self._save_ckpt(model, save_dir)
                     self.score_logs[global_step] = scores['ROUGE_L']
-                    state_dict = model.state_dict()
-                    torch.save(state_dict, os.path.join(
-                        os.path.join(output_path,f'{global_step}/'),
-                        WEIGHTS_NAME))
 
         if save_best_model:
             import pandas as pd
@@ -356,6 +354,7 @@ class Trainer:
             best_iter = res.index(res.argmax())
             best_score = res.max()
             best_save_path = os.path.join(output_path, './best')
+            if not os.path.exists(best_save_path): os.makedirs(best_save_path)
             best_origin_path = os.path.join(output_path, f'./{best_iter}')
             print(f'save best checkpoint at iter {best_iter} [ROUGE_L] {best_score} to', 
                 best_save_path)
@@ -384,5 +383,10 @@ class Trainer:
             return transformers.get_cosine_with_hard_restarts_schedule_with_warmup(optimizer, num_warmup_steps=warmup_steps, num_training_steps=t_total)
         else:
             raise ValueError("Unknown scheduler {}".format(scheduler))
+    
+    def _save_ckpt(self, model, save_dir):
+        if not os.path.exists(save_dir): os.makedirs(save_dir)
+        state_dict = model.state_dict()
+        torch.save(state_dict, os.path.join(save_dir, WEIGHTS_NAME))
 
 
