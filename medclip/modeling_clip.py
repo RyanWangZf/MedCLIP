@@ -138,5 +138,6 @@ class MedCLIPModel(nn.Module):
         input_ids = input_ids.to(self.clip.device)
         attention_mask = attention_mask.to(self.clip.device)
         text_embeds = self.clip.text_model(input_ids=input_ids, attention_mask=attention_mask)['pooler_output']
+        text_embeds = self.clip.text_projection(text_embeds)
         if normalize: text_embeds = text_embeds / text_embeds.norm(dim=-1, keepdim=True)
         return text_embeds

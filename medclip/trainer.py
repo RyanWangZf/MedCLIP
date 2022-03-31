@@ -356,8 +356,7 @@ class Trainer:
             best_save_path = os.path.join(output_path, './best')
             if not os.path.exists(best_save_path): os.makedirs(best_save_path)
             best_origin_path = os.path.join(output_path, f'./{best_iter}')
-            print(f'save best checkpoint at iter {best_iter} [ROUGE_L] {best_score} to', 
-                best_save_path)
+            print(f'save best checkpoint at iter {best_iter} [ROUGE_L] {best_score} to', best_save_path)
             copy_tree(best_origin_path,best_save_path)
 
         if eval_dataloader is None and output_path is not None:   #No evaluator, but output path: save final model version
