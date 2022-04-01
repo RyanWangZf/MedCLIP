@@ -8,6 +8,8 @@ import pandas as pd
 import numpy as np
 np.random.seed(42)
 
+# #####################
+# define output dirs
 datadir = './data/IU_XRay'
 image_dir = os.path.join(datadir, './images/images_normalized')
 reports = pd.read_csv(os.path.join(datadir, 'indiana_reports.csv'), index_col=0)
@@ -47,7 +49,7 @@ def func(out_dir, set_idx):
         src_path = os.path.join(image_dir, filename)
         dest_path = os.path.join(out_image_dir, filename)
         shutil.copy(src_path, dest_path)
-    reports.to_csv(out_report_path)
+    reports_sub.to_csv(out_report_path)
     projection_sub.to_csv(out_proj_path)
 
 func(out_train_dir, train_idx)

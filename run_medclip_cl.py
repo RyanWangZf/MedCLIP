@@ -26,10 +26,10 @@ train_config = {
     'num_epochs': 100,
     'warmup': 0.1, # the first 10% of training steps are used for warm-up
     'lr': 5e-5,
-    'weight_decay': 1e-5,
+    'weight_decay': 0,
     'eval_batch_size': 128,
     'eval_steps': 100,
-    }
+}
 model_save_path = f'./checkpoints/'
 if not os.path.exists(model_save_path):
     os.makedirs(model_save_path)
@@ -42,16 +42,7 @@ model = model.to(device)
 momentum_model = MedCLIPModel()
 momentum_model = momentum_model.to(device)
 
-# #########
-# define the evaluator
-# #########
-eval_data = IUXRayDataset('./data/IU_XRay', 'val')
-collate_fn = IUXRayImageTextCollator(img_mean=eval_data.img_mean, img_std=eval_data.img_std, is_train=False)
-eval_dataloader = DataLoader(eval_data, batch_size=train_config['eval_batch_size'], shuffle=False, collate_fn=collate_fn)
-sentence_data = IUXRaySentenceDataset('./data/IU_XRay')
-text_collate_fn = IUXRayTextCollator()
-sentence_dataloader = DataLoader(sentence_data, 256, shuffle=False, collate_fn=text_collate_fn)
-evaluator = Evaluator(model, eval_dataloader, sentence_dataloader)
+
 
 # image-text pair CL
 training_data = IUXRayDataset('./data/IU_XRay','train')
@@ -59,6 +50,16 @@ collate_fn = IUXRayImageTextCollator(img_mean=training_data.img_mean, img_std=tr
 dataloader_image_text = DataLoader(training_data, batch_size=train_config['batch_size'], shuffle=True, collate_fn=collate_fn)
 train_loss_image_text = ImageTextContrastiveLoss(model)
 warmup_steps = math.ceil(len(training_data) * train_config['num_epochs'] * train_config['warmup']) #10% of train data for warm-up
+
+
+
+# #########
+# define the evaluator
+# #########
+eval_data = IUXRayDataset('./data/IU_XRay', 'val')
+collate_fn = IUXRayImageTextCollator(img_mean=eval_data.img_mean, img_std=eval_data.img_std, is_train=False)
+eval_dataloader = DataLoader(eval_data, batch_size=train_config['eval_batch_size'], shuffle=False, collate_fn=collate_fn)
+evaluator = Evaluator(model, eval_dataloader, training_data.reports)
 
 # abnormal-normal pair CL + memory banking (moco V3)
 training_data = IUXRayDataset('./data/IU_XRay', 'train')
@@ -77,6 +78,9 @@ train_objectives = [
     (dataloader_abnormal, train_loss_abnormal),
     (dataloader_frontal, train_loss_frontal),
 ]
+# train_objectives = [
+#     (dataloader_image_text, train_loss_image_text)
+# ]
 
 # TODO fix checkpoint save and evaluation in trainer
 trainer = Trainer()

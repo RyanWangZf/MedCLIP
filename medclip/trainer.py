@@ -293,7 +293,6 @@ class Trainer:
 
             for _ in trange(steps_per_epoch, desc="Iteration", smoothing=0.05, disable=not show_progress_bar):
                 # check if model parameters keep same
-
                 for train_idx in range(num_train_objectives):
                     loss_model = loss_models[train_idx]
                     optimizer = optimizers[train_idx]
@@ -309,7 +308,8 @@ class Trainer:
 
                     if use_amp:
                         with autocast():
-                            loss_value = loss_model(**data)
+                            loss_model_return = loss_model(**data)
+                        loss_value = loss_model_return['loss_value']
                         scale_before_step = scaler.get_scale()
                         scaler.scale(loss_value).backward()
                         scaler.unscale_(optimizer)
@@ -318,7 +318,8 @@ class Trainer:
                         scaler.update()
                         skip_scheduler = scaler.get_scale() != scale_before_step
                     else:
-                        loss_value = loss_model(**data)
+                        loss_model_return = loss_model(**data)
+                        loss_value = loss_model_return['loss_value']
                         loss_value.backward()
                         torch.nn.utils.clip_grad_norm_(loss_model.parameters(), max_grad_norm)
                         optimizer.step()
@@ -326,8 +327,13 @@ class Trainer:
                     train_loss_dict[train_idx].append(loss_value.item())
                     optimizer.zero_grad()
 
-                    if not skip_scheduler:
-                        scheduler.step()
+                # for all train objectives we only use one embedding to update image embedding    
+                if self.evaluator is not None:
+                    # update image embeddings
+                    self.evaluator.update_memory(loss_model_return)
+
+                if not skip_scheduler:
+                    scheduler.step()
 
                 training_steps += 1
                 global_step += 1
@@ -339,13 +345,13 @@ class Trainer:
                     train_loss_dict = defaultdict(list)
 
                 if evaluation_steps > 0 and global_step % evaluation_steps == 0 and self.evaluator is not None:
-                    self.evaluator.update_sentence_memory()
                     scores = self.evaluator.evaluate()
                     print(f'######### Eval {global_step} #########')
                     for key in scores.keys(): print('{}: {:.4f}'.format(key, scores[key]))
                     save_dir =  os.path.join(output_path, f'{global_step}/')
                     self._save_ckpt(model, save_dir)
                     self.score_logs[global_step] = scores['ROUGE_L']
+                    self.evaluator.reset_memory() # reset image embedding memory
 
         if save_best_model:
             import pandas as pd

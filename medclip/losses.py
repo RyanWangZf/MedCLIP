@@ -23,10 +23,10 @@ class ImageTextContrastiveLoss(nn.Module):
         pixel_values=None,
         attention_mask=None,
         position_ids=None,
-        return_loss=None,
         output_attentions=None,
         output_hidden_states=None,
         return_dict=None,
+        **kwargs,
         ):
         '''return loss values
         '''
@@ -40,7 +40,14 @@ class ImageTextContrastiveLoss(nn.Module):
                 output_hidden_states=output_hidden_states,
                 return_dict=return_dict,
                 )
-        return outputs.loss
+        
+        return_res = {
+            'loss_value': outputs.loss,
+            'report': kwargs['report'],
+            'image_embedding': outputs.image_embeds,
+            'uid': kwargs['uid'],
+        }
+        return return_res
 
 class ImageImageContrastiveLoss(nn.Module):
     '''compute contrastive loss using momentum memory banks between images and images,
@@ -84,6 +91,7 @@ class ImageImageContrastiveLoss(nn.Module):
         output_attentions=None,
         output_hidden_states=None,
         return_dict=None,
+        **kwargs,
     ):
         '''
         * for normal/abnormal CL loss
@@ -108,7 +116,6 @@ class ImageImageContrastiveLoss(nn.Module):
         if len(labels.unique()) == 1: # no abnormal images / normal images
             # only do instance discriminative loss
             loss = self.contrastive_loss(feat_base, feat_momtm)
-            return loss
         else:
             feat_base_nm = feat_base[labels==0]
             feat_base_ab = feat_base[labels==1]
@@ -126,4 +133,12 @@ class ImageImageContrastiveLoss(nn.Module):
                 feat_base_ab, 
                 torch.cat([feat_momtm_ab, feat_momtm_nm], axis=0)
                 )
-            return loss_ab + loss_nm
+            
+            loss = loss_ab + loss_nm
+        
+        return_res = {
+            'loss_value': loss,
+            'uid': kwargs['uid'],
+            'image_embedding': feat_base,
+        }
+        return return_res

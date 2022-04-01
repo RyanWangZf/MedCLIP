@@ -6,7 +6,6 @@ from transformers.models.clip.modeling_clip import CLIPOutput
 import torch
 from torch import nn
 
-
 # contrastive loss function, adapted from
 # https://sachinruk.github.io/blog/pytorch/pytorch%20lightning/loss%20function/gpu/2021/03/07/CLIP.html
 def contrastive_loss(logits: torch.Tensor) -> torch.Tensor:
@@ -32,12 +31,15 @@ class MedCLIPModel(nn.Module):
 
         self.config = self.clip.config
         # define the visual parts
-        self.pixel_input_conv = nn.Conv2d(1,3,1)
+        self.pixel_input_conv = nn.Conv2d(1,3,1,bias=False)
         self.vision_model = nn.Sequential(
             self.pixel_input_conv,
             self.clip.vision_model,
         )
         self.visual_projection = self.clip.visual_projection
+        
+        # store a mapping between uid to image embedding
+        self.image_embedding_bank = dict()
 
     def forward(
         self,

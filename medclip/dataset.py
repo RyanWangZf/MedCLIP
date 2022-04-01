@@ -1,3 +1,4 @@
+from multiprocessing.sharedctypes import Value
 import os
 from collections import defaultdict
 import pdb
@@ -11,6 +12,7 @@ from transformers import CLIPProcessor, CLIPModel, CLIPFeatureExtractor, CLIPTok
 
 import pandas as pd
 import numpy as np
+
 from .feature_extractor import MedCLIPFeatureExtractor
 
 class IUXRayDataset(Dataset):
@@ -18,7 +20,8 @@ class IUXRayDataset(Dataset):
     # how to crop raw images into patches
     res=rearrange(x_frontal[:,None,:9*224,:11*224], 'b c (h p1) (w p2) -> b (h w c) p1 p2', p1=224,p2=224)
     '''
-    _report_sections_ = ['findings','impression','MeSH']
+    _report_sections_ = ['findings','impression']
+    _label_section_ = ['MeSH']
     channel_num = 1 # XRay is a gray scale image
     img_mean = [0.5862785803043838]
     img_std = [0.27950088968644304]
@@ -31,7 +34,7 @@ class IUXRayDataset(Dataset):
 
         # drop NaN findings and impressions
         not_null_idx = ~(reports['findings'].isnull() * reports['impression'].isnull())
-        reports = reports[not_null_idx][self._report_sections_]
+        reports = reports[not_null_idx][self._report_sections_ + self._label_section_]
         df_frontal = projection[projection['projection']=='Frontal']
         df_lateral = projection[projection['projection']=='Lateral']
 
@@ -104,9 +107,9 @@ class IUXRayDataset(Dataset):
             l_list.append(x_image)
 
         if len(f_list) == 0 and len(l_list) == 0:
-            pdb.set_trace()
-            pass
-        return {'frontal': f_list, 'lateral': l_list, 'report': report_str, 'label': report['MeSH']}
+            raise ValueError(f'no report found for this image from uid: {uid}, please check your dataset!')
+
+        return {'frontal': f_list, 'lateral': l_list, 'report': report_str, 'label': report['MeSH'], 'uid': uid}
 
 class IUXRaySentenceDataset(Dataset):
     def __init__(self, datadir):
@@ -201,41 +204,45 @@ class IUXRayImageTextCollator(IUXRayCollatorBase):
     def __call__(self, x):
         '''
         x: list of dict{frontal, lateral, report, label}
-        return {'input_ids': [], 'pixel_values': [], 'attention_mask':[], 'report':[]}
+        return {'input_ids': [], 'pixel_values': [], 'attention_mask':[], 'report':[], 'uid':[]}
         '''
         inputs = defaultdict(list)
-        text_list = []
+        text_list, uid_list = [], []
         for data in x: # every data is a single patient
             report = data['report']
+            uid = data['uid']
             if self.is_train: report = self._text_random_cut_(report)
             if len(data['frontal']) > 0:
                 images = self.feature_extractor(data['frontal'], return_tensors='pt')
                 inputs['pixel_values'].append(images['pixel_values'])
                 text_list.extend([report] * len(data['frontal']))
+                uid_list.extend([str(uid)] * len(data['frontal']))
             if len(data['lateral']) > 0:
                 images = self.feature_extractor(data['lateral'], return_tensors='pt')
                 inputs['pixel_values'].append(images['pixel_values'])
                 text_list.extend([report] * len(data['lateral']))
+                uid_list.extend([str(uid)] * len(data['lateral']))
+
         # tokenize texts together
-        try:
-            text_token_ids = self.tokenizer(text_list, return_tensors='pt', padding=True, truncation=True)
-        except:
-            pdb.set_trace()
+        text_token_ids = self.tokenizer(text_list, return_tensors='pt', padding=True, truncation=True)
 
         for key in text_token_ids.keys():
             inputs[key] = text_token_ids[key]
         inputs['pixel_values'] = torch.cat(inputs['pixel_values'])
-        if not self.is_train: inputs['report'] = text_list
+        inputs['report'] = text_list
+        inputs['uid'] = uid_list
         return inputs
 
     def _text_random_cut_(self, text):
-        token_list = text.split(' ')
-        max_start_idx = np.maximum(len(token_list)-self.tokenizer.model_max_length, 0)
-        if max_start_idx == 0:
-            return text
-        else:
-            start_idx = np.random.randint(0, max_start_idx)
-            return ' '.join(token_list[start_idx:start_idx+self.tokenizer.model_max_length])
+        '''randomly cut the whole sentences into pieces
+        '''
+        sent_list = [sent.strip() for sent in text.split('.') if len(sent)>0]
+        np.random.shuffle(sent_list)
+        return '. '.join(sent_list[:np.random.binomial(len(sent_list), 0.15)+1]) + '.'
+
+    def _text_sentence_cut_(self, text):
+        sent_list = [sent.strip() for sent in text.split('.') if len(sent)>0]
+        return np.random.choice(sent_list, 1)[0]
 
 class IUXRayAbnormalNormalCollator(IUXRayCollatorBase):
     def __init__(self, feature_extractor=None, tokenizer=None, img_mean=None, img_std=None, is_train=False):
@@ -253,18 +260,29 @@ class IUXRayAbnormalNormalCollator(IUXRayCollatorBase):
         abnormals encodings will be saved in an momentum memory bank
         '''
         inputs = defaultdict(list)
+        text_list, uid_list = [], []
         for data in x:
+            report = data['report']
+            uid = data['uid']
             label = 0 if data['label']=='normal' else 1
             num_images = len(data['frontal']) + len(data['lateral'])
             if len(data['frontal']) > 0:
                 images = self.feature_extractor(data['frontal'], return_tensors='pt')
                 inputs['pixel_values'].append(images['pixel_values'])
+                text_list.extend([report] * len(data['frontal']))
+                uid_list.extend([str(uid)] * len(data['frontal']))
+
             if len(data['lateral']) > 0:
                 images = self.feature_extractor(data['lateral'], return_tensors='pt')
                 inputs['pixel_values'].append(images['pixel_values'])
+                text_list.extend([report] * len(data['lateral']))
+                uid_list.extend([str(uid)] * len(data['lateral']))
+
             inputs['labels'].extend([label]*num_images)
         inputs['pixel_values'] = torch.cat(inputs['pixel_values'])
         inputs['labels'] = torch.tensor(inputs['labels'])
+        inputs['report'] = text_list
+        inputs['uid'] = uid_list
         return inputs
 
 class IUXRayFrontalLateralCollator(IUXRayCollatorBase):
@@ -284,17 +302,29 @@ class IUXRayFrontalLateralCollator(IUXRayCollatorBase):
         labels==1: lateral
         '''
         inputs = defaultdict(list)
+        text_list, uid_list = [], []
+
         for data in x:
+            report = data['report']
+            uid = data['uid']
             if len(data['frontal']) > 0:
                 images = self.feature_extractor(data['frontal'], return_tensors='pt')
                 inputs['pixel_values'].append(images['pixel_values'])
                 inputs['labels'].extend([0]*len(data['frontal']))
+                text_list.extend([report] * len(data['frontal']))
+                uid_list.extend([str(uid)] * len(data['frontal']))
+
             if len(data['lateral']) > 0:
                 images = self.feature_extractor(data['lateral'], return_tensors='pt')
                 inputs['pixel_values'].append(images['pixel_values'])
                 inputs['labels'].extend([1]*len(data['lateral']))
+                text_list.extend([report] * len(data['lateral']))
+                uid_list.extend([str(uid)] * len(data['lateral']))
+
         inputs['pixel_values'] = torch.cat(inputs['pixel_values'])
         inputs['labels'] = torch.tensor(inputs['labels'])
+        inputs['uid'] = uid_list
+        inputs['report'] = text_list
         return inputs
 
 class IUXRayTextCollator(IUXRayCollatorBase):
