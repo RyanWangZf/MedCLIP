@@ -30,6 +30,9 @@ class ImageTextContrastiveLoss(nn.Module):
         ):
         '''return loss values
         '''
+        # set train status
+        self.model.training = self.training
+
         outputs = self.model(
                 input_ids=input_ids,
                 pixel_values=pixel_values,
@@ -110,6 +113,9 @@ class ImageImageContrastiveLoss(nn.Module):
             k1, k2: momentum encode x1, x2
             same as MOCO where {q1,k2} positive, {q2,k1} positive on diagonal
         '''
+        # set train status
+        self.base_encoder.training = self.training
+
         feat_base = self.base_encoder.encode_image(pixel_values) # bs, 512
         feat_momtm = self.momentum_encoder.encode_image(pixel_values) # bs, 512
 
@@ -125,13 +131,13 @@ class ImageImageContrastiveLoss(nn.Module):
             # q1,k1,k2
             loss_nm = self.contrastive_loss(
                 feat_base_nm, 
-                torch.cat([feat_momtm_nm, feat_momtm_ab], axis=0)
+                torch.cat([feat_momtm_nm, feat_base_ab], axis=0)
                 )
 
             # q2,k2,k1
             loss_ab = self.contrastive_loss(
                 feat_base_ab, 
-                torch.cat([feat_momtm_ab, feat_momtm_nm], axis=0)
+                torch.cat([feat_momtm_ab, feat_base_nm], axis=0)
                 )
             
             loss = loss_ab + loss_nm

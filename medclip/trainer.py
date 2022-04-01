@@ -249,11 +249,12 @@ class Trainer:
         self.evaluator = evaluator
         self.eval_dataloader = eval_dataloader
 
-        dataloaders = [dataloader for dataloader,_ in train_objectives]
+        dataloaders = [dataloader for dataloader,_,_ in train_objectives]
         if steps_per_epoch is None or steps_per_epoch == 0:
             steps_per_epoch = min([len(dataloader) for dataloader in dataloaders])
         num_train_steps = int(steps_per_epoch * epochs)
-        loss_models = [loss for _, loss in train_objectives]
+        loss_models = [loss for _, loss,_ in train_objectives]
+        train_weights = [weight for _,_,weight in train_objectives]
         
         # Prepare optimizers
         optimizers = []
@@ -287,14 +288,14 @@ class Trainer:
         for epoch in trange(epochs, desc="Epoch", disable=not show_progress_bar):
             training_steps = 0
 
-            for loss_model in loss_models:
-                loss_model.zero_grad()
-                loss_model.train()
-
             for _ in trange(steps_per_epoch, desc="Iteration", smoothing=0.05, disable=not show_progress_bar):
                 # check if model parameters keep same
                 for train_idx in range(num_train_objectives):
                     loss_model = loss_models[train_idx]
+                    loss_model.zero_grad()
+                    loss_model.train()
+
+                    loss_weight = train_weights[train_idx]
                     optimizer = optimizers[train_idx]
                     scheduler = schedulers[train_idx]
                     data_iterator = data_iterators[train_idx]
@@ -309,7 +310,7 @@ class Trainer:
                     if use_amp:
                         with autocast():
                             loss_model_return = loss_model(**data)
-                        loss_value = loss_model_return['loss_value']
+                        loss_value = loss_weight * loss_model_return['loss_value']
                         scale_before_step = scaler.get_scale()
                         scaler.scale(loss_value).backward()
                         scaler.unscale_(optimizer)
@@ -319,7 +320,7 @@ class Trainer:
                         skip_scheduler = scaler.get_scale() != scale_before_step
                     else:
                         loss_model_return = loss_model(**data)
-                        loss_value = loss_model_return['loss_value']
+                        loss_value = loss_weight * loss_model_return['loss_value']
                         loss_value.backward()
                         torch.nn.utils.clip_grad_norm_(loss_model.parameters(), max_grad_norm)
                         optimizer.step()
@@ -338,7 +339,7 @@ class Trainer:
                 training_steps += 1
                 global_step += 1
 
-                if global_step % 100 == 0:
+                if global_step % 10 == 0:
                     print('######### Train Loss #########')
                     for key in train_loss_dict.keys():
                         print('{} {:.4f} \n'.format(key, np.mean(train_loss_dict[key])))

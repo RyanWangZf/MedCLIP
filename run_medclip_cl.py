@@ -21,12 +21,13 @@ from medclip.evaluator import Evaluator
 
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
+# to finetune clip: https://github.com/openai/CLIP/issues/150
 train_config = {
     'batch_size': 64,
     'num_epochs': 100,
-    'warmup': 0.1, # the first 10% of training steps are used for warm-up
-    'lr': 5e-5,
-    'weight_decay': 0,
+    'warmup': 0.05, # the first 5% of training steps are used for warm-up
+    'lr': 1e-5,
+    'weight_decay': 1e-3,
     'eval_batch_size': 128,
     'eval_steps': 100,
 }
@@ -42,16 +43,12 @@ model = model.to(device)
 momentum_model = MedCLIPModel()
 momentum_model = momentum_model.to(device)
 
-
-
 # image-text pair CL
 training_data = IUXRayDataset('./data/IU_XRay','train')
 collate_fn = IUXRayImageTextCollator(img_mean=training_data.img_mean, img_std=training_data.img_std, is_train=True)
 dataloader_image_text = DataLoader(training_data, batch_size=train_config['batch_size'], shuffle=True, collate_fn=collate_fn)
 train_loss_image_text = ImageTextContrastiveLoss(model)
 warmup_steps = math.ceil(len(training_data) * train_config['num_epochs'] * train_config['warmup']) #10% of train data for warm-up
-
-
 
 # #########
 # define the evaluator
@@ -73,14 +70,12 @@ collate_fn = IUXRayFrontalLateralCollator(img_mean=training_data.img_mean, img_s
 dataloader_frontal = DataLoader(training_data, batch_size=train_config['batch_size'], shuffle=True, collate_fn=collate_fn)
 train_loss_frontal = ImageImageContrastiveLoss(model, momentum_model)
 
+# dataloader, loss_model, loss_weight
 train_objectives = [
-    (dataloader_image_text, train_loss_image_text),
-    (dataloader_abnormal, train_loss_abnormal),
-    (dataloader_frontal, train_loss_frontal),
+    (dataloader_image_text, train_loss_image_text, 1),
+    (dataloader_abnormal, train_loss_abnormal, 0.2),
+    (dataloader_frontal, train_loss_frontal, 0.2),
 ]
-# train_objectives = [
-#     (dataloader_image_text, train_loss_image_text)
-# ]
 
 # TODO fix checkpoint save and evaluation in trainer
 trainer = Trainer()
