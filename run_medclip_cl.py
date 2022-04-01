@@ -26,8 +26,8 @@ train_config = {
     'batch_size': 64,
     'num_epochs': 100,
     'warmup': 0.05, # the first 5% of training steps are used for warm-up
-    'lr': 1e-5,
-    'weight_decay': 1e-3,
+    'lr': 5e-5,
+    'weight_decay': 1e-1,
     'eval_batch_size': 128,
     'eval_steps': 100,
 }
@@ -40,8 +40,8 @@ if not os.path.exists(model_save_path):
 # #########
 model = MedCLIPModel()
 model = model.to(device)
-momentum_model = MedCLIPModel()
-momentum_model = momentum_model.to(device)
+# momentum_model = MedCLIPModel()
+# momentum_model = momentum_model.to(device)
 
 # image-text pair CL
 training_data = IUXRayDataset('./data/IU_XRay','train')
@@ -59,23 +59,29 @@ eval_dataloader = DataLoader(eval_data, batch_size=train_config['eval_batch_size
 evaluator = Evaluator(model, eval_dataloader, training_data.reports)
 
 # abnormal-normal pair CL + memory banking (moco V3)
-training_data = IUXRayDataset('./data/IU_XRay', 'train')
-collate_fn = IUXRayAbnormalNormalCollator(img_mean=training_data.img_mean, img_std=training_data.img_std, is_train=True)
-dataloader_abnormal = DataLoader(training_data, batch_size=train_config['batch_size'], shuffle=True, collate_fn=collate_fn)
-train_loss_abnormal = ImageImageContrastiveLoss(model, momentum_model)
+# training_data = IUXRayDataset('./data/IU_XRay', 'train')
+# collate_fn = IUXRayAbnormalNormalCollator(img_mean=training_data.img_mean, img_std=training_data.img_std, is_train=True)
+# dataloader_abnormal = DataLoader(training_data, batch_size=train_config['batch_size'], shuffle=True, collate_fn=collate_fn)
+# train_loss_abnormal = ImageImageContrastiveLoss(model, momentum_model)
 
 # frontal-lateral paired CL + memory banks (moco V3)
-training_data = IUXRayDataset('./data/IU_XRay', 'train')
-collate_fn = IUXRayFrontalLateralCollator(img_mean=training_data.img_mean, img_std=training_data.img_std, is_train=True)
-dataloader_frontal = DataLoader(training_data, batch_size=train_config['batch_size'], shuffle=True, collate_fn=collate_fn)
-train_loss_frontal = ImageImageContrastiveLoss(model, momentum_model)
+# training_data = IUXRayDataset('./data/IU_XRay', 'train')
+# collate_fn = IUXRayFrontalLateralCollator(img_mean=training_data.img_mean, img_std=training_data.img_std, is_train=True)
+# dataloader_frontal = DataLoader(training_data, batch_size=train_config['batch_size'], shuffle=True, collate_fn=collate_fn)
+# train_loss_frontal = ImageImageContrastiveLoss(model, momentum_model)
 
 # dataloader, loss_model, loss_weight
+# train_objectives = [
+#     (dataloader_image_text, train_loss_image_text, 1),
+#     (dataloader_abnormal, train_loss_abnormal, 0.2),
+#     (dataloader_frontal, train_loss_frontal, 0.2),
+# ]
+
+
 train_objectives = [
     (dataloader_image_text, train_loss_image_text, 1),
-    (dataloader_abnormal, train_loss_abnormal, 0.2),
-    (dataloader_frontal, train_loss_frontal, 0.2),
 ]
+
 
 # TODO fix checkpoint save and evaluation in trainer
 trainer = Trainer()

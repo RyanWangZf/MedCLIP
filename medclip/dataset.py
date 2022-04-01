@@ -237,7 +237,6 @@ class IUXRayImageTextCollator(IUXRayCollatorBase):
         '''randomly cut the whole sentences into pieces
         '''
         sent_list = [sent.strip() for sent in text.split('.') if len(sent)>0]
-        np.random.shuffle(sent_list)
         return '. '.join(sent_list[:np.random.binomial(len(sent_list), 0.15)+1]) + '.'
 
     def _text_sentence_cut_(self, text):
