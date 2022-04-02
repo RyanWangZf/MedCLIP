@@ -109,6 +109,7 @@ class IUXRayDataset(Dataset):
         if len(f_list) == 0 and len(l_list) == 0:
             raise ValueError(f'no report found for this image from uid: {uid}, please check your dataset!')
 
+
         return {'frontal': f_list, 'lateral': l_list, 'report': report_str, 'label': report['MeSH'], 'uid': uid}
 
 class IUXRaySentenceDataset(Dataset):

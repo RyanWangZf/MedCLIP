@@ -97,6 +97,8 @@ class ImageImageContrastiveLoss(nn.Module):
         **kwargs,
     ):
         '''
+        p_v = [img_1, img_2..]
+        labels= [0, 1, 0, 1,...]
         * for normal/abnormal CL loss
             x1: normal images, x2: abnormal images
             q1: normal image feature, q2: abnormal image feature
@@ -114,6 +116,9 @@ class ImageImageContrastiveLoss(nn.Module):
             same as MOCO where {q1,k2} positive, {q2,k1} positive on diagonal
         '''
         # set train status
+        # self.base_encoder = MedCLIP()
+        # self.base_encoder.encode_image(pixel_values)
+
         self.base_encoder.training = self.training
 
         feat_base = self.base_encoder.encode_image(pixel_values) # bs, 512

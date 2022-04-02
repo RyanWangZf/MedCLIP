@@ -41,6 +41,11 @@ class MedCLIPModel(nn.Module):
         # store a mapping between uid to image embedding
         self.image_embedding_bank = dict()
 
+        # image -> encoder -> img_emb [8, 128]
+        # [no finding, enlarge, ...,] -> tokenizer() -> input_ids [14, num_token] -> text_encoder -> text_emb [14, 128]
+        # img_emb dot text_emb.T -> [8, 14]
+        # 1st row [0.5, 0.1, ...., ] \in \R^14
+
     def forward(
         self,
         input_ids=None,
@@ -143,3 +148,23 @@ class MedCLIPModel(nn.Module):
         text_embeds = self.clip.text_projection(text_embeds)
         if normalize: text_embeds = text_embeds / text_embeds.norm(dim=-1, keepdim=True)
         return text_embeds
+
+    
+    # text - image retrieval
+    # model = MedCLIP()
+    # input_text = [sent1, sent2]
+    # model.encode_text(input_text) -> [1, 128]
+    # input_img
+
+
+    # image - image retrieval, training
+    # image_1 = ['frontal', 'frontal']
+    # image_2 = ['lateral', 'lateral']
+
+    # image_1 = ['normal', 'normal']
+    # image_2 = ['abnormal', 'abnormal']
+
+    # image_1 = [no_finding_img, no_finding_img]
+    # image_2 = [enlarge_img, enlarged_img]
+
+    # 

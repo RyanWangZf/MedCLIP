@@ -77,7 +77,6 @@ evaluator = Evaluator(model, eval_dataloader, training_data.reports)
 #     (dataloader_frontal, train_loss_frontal, 0.2),
 # ]
 
-
 train_objectives = [
     (dataloader_image_text, train_loss_image_text, 1),
 ]
