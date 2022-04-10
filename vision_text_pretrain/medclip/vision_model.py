@@ -1,7 +1,7 @@
 '''implementations of UWinTransformer,
 adapated from SwinTransformer
 '''
-import pdb
+import pdb,os
 
 import torch
 import torch.nn as nn
@@ -477,7 +477,7 @@ class Uwinformer(nn.Module):
                  window_size=8, mlp_ratio=4., qkv_bias=True, qk_scale=None,
                  drop_rate=0., attn_drop_rate=0., drop_path_rate=0.1,
                  norm_layer=nn.LayerNorm, ape=False, patch_norm=True,
-                 use_checkpoint=False, **kwargs):
+                 use_checkpoint=False, checkpoint=None, **kwargs):
         super().__init__()
 
         self.proj_dim = proj_dim
@@ -531,6 +531,20 @@ class Uwinformer(nn.Module):
         self.avgpool = nn.AdaptiveAvgPool1d(1)
         self.projection_head = nn.Linear(self.num_features, proj_dim)
         self.apply(self._init_weights)
+
+        if os.path.isdir(checkpoint):
+            checkpoint = os.path.join(checkpoint, 'pytorch_model.bin')
+            state_dict = torch.load(checkpoint)
+            # remove prefix model
+            new_state_dict = {}
+            for key in state_dict.keys():
+                if 'model' in key:
+                    name = key[6:]
+                else:
+                    name = key
+                new_state_dict[name] = state_dict[key]
+            self.load_state_dict(new_state_dict)
+            print('load pretrained vision model from', checkpoint)
 
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
@@ -590,6 +604,8 @@ class Uwinformer(nn.Module):
         flops += self.num_features * self.patches_resolution[0] * self.patches_resolution[1] // (2 ** self.num_layers)
         flops += self.num_features * self.num_classes
         return flops
+    
+    
 
 if __name__ == '__main__':
     # test

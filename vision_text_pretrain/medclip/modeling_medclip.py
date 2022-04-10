@@ -5,7 +5,7 @@ import torch
 from torch import nn
 from transformers import AutoModel, AutoTokenizer
 
-from .modeling_vit import Uwinformer
+from .vision_model import Uwinformer
 
 class MedClipTextModel(nn.Module):
     def __init__(self, 
@@ -28,7 +28,7 @@ class MedClipTextModel(nn.Module):
         return embed
 
 class MedClipVisionModel(nn.Module):
-    def __init__(self) -> None:
+    def __init__(self, checkpoint=None) -> None:
         super().__init__()
         self.vit_type = 'uwinformer'
         self.model = Uwinformer(
@@ -39,6 +39,7 @@ class MedClipVisionModel(nn.Module):
             embed_dim=128,
             num_heads=[4, 8, 8, 16],
             window_size=8,
+            checkpoint=checkpoint,
         )
 
     def forward(self, pixel_values):
@@ -50,9 +51,11 @@ class MedClipVisionModel(nn.Module):
         return img_embeds
 
 class MedClipModel(nn.Module):
-    def __init__(self) -> None:
+    def __init__(self,
+        vision_checkpoint=None,
+        ) -> None:
         super().__init__()
-        self.vision_model = MedClipVisionModel()
+        self.vision_model = MedClipVisionModel(checkpoint=vision_checkpoint)
         self.text_model = MedClipTextModel()
         self.contrast_temperature =1
 

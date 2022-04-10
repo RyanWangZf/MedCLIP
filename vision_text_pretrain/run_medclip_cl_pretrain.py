@@ -1,3 +1,4 @@
+from cmath import isnan
 import pdb, os
 import math
 from collections import defaultdict
@@ -12,7 +13,7 @@ from PIL import Image
 
 from transformers import AutoTokenizer
 
-os.environ['CUDA_VISIBLE_DEVICES']='0'
+os.environ['CUDA_VISIBLE_DEVICES']='1'
 
 from medclip.modeling_medclip import MedClipModel
 from medclip.trainer import Trainer
@@ -20,27 +21,61 @@ from medclip.trainer import Trainer
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
 train_config = {
-    'batch_size': 32,
+    'batch_size': 128,
     'num_epochs': 3,
     'warmup': 0.01, # the first 1% of training steps are used for warm-up
     'lr': 5e-5,
-    'weight_decay': 5e-2,
+    'weight_decay': 1e-2,
     'eval_batch_size': 128,
     'eval_steps': 100,
     'save_steps': 500,
 }
 
 class ImageTextContrastiveDataset(Dataset):
-    def __init__(self, imgtransform) -> None:
+    _labels_ = ['No Finding', 'Enlarged Cardiomediastinum', 'Cardiomegaly', 'Lung Lesion', 'Lung Opacity', 'Edema', 'Consolidation', 'Pneumonia', 'Atelectasis', 'Pneumothorax', 'Pleural Effusion', 'Pleural Other', 'Fracture', 'Support Devices']
+    def __init__(self, datalist=['chexpert', 'mimic-cxr', 'iuxray'], imgtransform=None) -> None:
+        '''support data list in iuxray, mimic-cxr, chexpert
+        '''
         super().__init__()
-        self.df = pd.read_csv('./local_data/iuxray-meta.csv')
+        # imgpath, subject_id, report, labels...(14 labels)
+        df_list = []
+        for data in datalist:
+            filename = f'./local_data/{data}-meta.csv'
+            print('load data from', filename)
+            df = pd.read_csv(filename, index_col=0)
+            df_list.append(df)
+        df = pd.concat(df_list, axis=0).reset_index(drop=True)
+        self.df = df
         self.transform = imgtransform
-    
+        self.sentence_label = pd.read_csv('./local_data/iuxray-sentence-label.csv').fillna(0)
+        # remove duplicate reports
+        self.sentence_label = self.sentence_label.drop_duplicates(subset='Reports')
+        # remove too short sentence
+        self.sentence_label = self.sentence_label[self.sentence_label['Reports'].map(len)>2].reset_index(drop=True)
+        # get negative phrase sentences
+        self.negative_sent_label = self.sentence_label.loc[(self.sentence_label[self._labels_] == -1).sum(1) > 0].copy()
+
+
     def __getitem__(self, index):
         row = self.df.iloc[index]
         img = Image.open(row.imgpath)
         img = self.transform(img).unsqueeze(1)
-        return img, row.report
+        report = '' if pd.isna(row.report) else row.report
+        if (row[self._labels_] == 0).all(): # no label available, use no finding
+            sampled_sent = self.sentence_label[self.sentence_label['No Finding'] > 0].sample()
+            report += ' ' + sampled_sent['Reports'].values[0]
+        else:
+            # get prompt sentence x * 0 = 0, 1 * -1 = -1, 1 * 1 = 1, -1 * -1 = 1
+            bool_sent_label = self.sentence_label[self._labels_] *  row[self._labels_]
+            bool_sent_label[bool_sent_label < 0] = 0
+            sents = self.sentence_label.loc[~(bool_sent_label.iloc[:,1:] == 0).all(1)]
+            if len(sents) == 0: # only no finding
+                sampled_sent = self.sentence_label[~(bool_sent_label == 0).all(1)].sample()
+            else:
+                # random sample
+                sampled_sent = sents.sample()
+            report += ' ' + sampled_sent['Reports'].values[0]
+        return img, report
             
     def __len__(self):
         return len(self.df)
@@ -89,7 +124,9 @@ img_transform = transforms.Compose([
 traindata = ImageTextContrastiveDataset(imgtransform=img_transform)
 trainloader = DataLoader(traindata, batch_size=train_config['batch_size'], collate_fn=collate_fn)
 
-model = MedClipModel()
+model = MedClipModel(
+    vision_checkpoint='./checkpoints/vision_pretrain'
+    )
 loss_model = ImageTextContrastiveLoss(model)
 loss_model.cuda()
 train_objectives = [
