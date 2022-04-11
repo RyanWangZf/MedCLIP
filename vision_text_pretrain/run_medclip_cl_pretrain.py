@@ -55,7 +55,6 @@ class ImageTextContrastiveDataset(Dataset):
         # get negative phrase sentences
         self.negative_sent_label = self.sentence_label.loc[(self.sentence_label[self._labels_] == -1).sum(1) > 0].copy()
 
-
     def __getitem__(self, index):
         row = self.df.iloc[index]
         img = Image.open(row.imgpath)
@@ -75,6 +74,10 @@ class ImageTextContrastiveDataset(Dataset):
                 # random sample
                 sampled_sent = sents.sample()
             report += ' ' + sampled_sent['Reports'].values[0]
+        
+        # randomly truncate report
+        # TODO
+
         return img, report
             
     def __len__(self):
@@ -122,7 +125,12 @@ img_transform = transforms.Compose([
     transforms.Normalize(mean=[0.5862785803043838],std=[0.27950088968644304])]
 )
 traindata = ImageTextContrastiveDataset(imgtransform=img_transform)
-trainloader = DataLoader(traindata, batch_size=train_config['batch_size'], collate_fn=collate_fn)
+trainloader = DataLoader(traindata, 
+    batch_size=train_config['batch_size'], collate_fn=collate_fn, 
+    shuffle=True,
+    pin_memory=True,
+    num_workers=12,
+    )
 
 model = MedClipModel(
     vision_checkpoint='./checkpoints/vision_pretrain'

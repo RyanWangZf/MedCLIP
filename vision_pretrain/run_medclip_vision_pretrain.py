@@ -19,10 +19,10 @@ from medclip.trainer import Trainer
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
 train_config = {
-    'batch_size': 80,
-    'num_epochs': 3,
+    'batch_size': 60,
+    'num_epochs': 20,
     'warmup': 0.01, # the first 1% of training steps are used for warm-up
-    'lr': 5e-4,
+    'lr': 1e-3,
     'weight_decay': 5e-2,
     'eval_batch_size': 128,
     'eval_steps': 100,
@@ -31,9 +31,18 @@ train_config = {
 
 # pretrain image encoder with pure images
 class ImageContrastiveDataset(Dataset):
-    def __init__(self, transform1=None,transform2=None) -> None:
+    def __init__(self, datalist=['mimic-cxr','iuxray','chexpert'], transform1=None,transform2=None) -> None:
         super().__init__()
-        self.df = pd.read_csv('./local_data/mimic-cxr-meta.csv')
+        # imgpath, subject_id, report, labels...(14 labels)
+        df_list = []
+        for data in datalist:
+            filename = f'./local_data/{data}-meta.csv'
+            print('load data from', filename)
+            df = pd.read_csv(filename, index_col=0)
+            df_list.append(df)
+        df = pd.concat(df_list, axis=0).reset_index(drop=True)
+        self.df = df
+
         self.transform1 = transform1
         self.transform2 = transform2
 
@@ -42,7 +51,7 @@ class ImageContrastiveDataset(Dataset):
         img = Image.open(row.imgpath)
         x1 = self.transform1(img)
         x2 = self.transform2(img)
-        return {'img1':x1.cuda(), 'img2':x2.cuda()}
+        return {'img1':x1, 'img2':x2}
 
     def __len__(self,):
         return len(self.df)
@@ -66,6 +75,8 @@ class VisionModelContrastiveLoss(nn.Module):
             param_m.data = param_m.data * m + param_b.data * (1. - m)
 
     def forward(self, img1, img2):
+        img1 = img1.cuda()
+        img2 = img2.cuda()
         feat1 = self.model(img1)
         feat2 = self.model(img2)
 
@@ -106,8 +117,11 @@ img_transform2 = transforms.Compose([
 ]
 
 )
-traindata = ImageContrastiveDataset(img_transform1, img_transform2)
-dataloader = DataLoader(traindata, batch_size=train_config['batch_size'], shuffle=True)
+traindata = ImageContrastiveDataset(transform1=img_transform1, transform2=img_transform2)
+dataloader = DataLoader(traindata, batch_size=train_config['batch_size'], 
+    num_workers=12,
+    shuffle=True, 
+    pin_memory=True)
 model = MedClipVisionModel()
 model_m = MedClipVisionModel()
 loss_model = VisionModelContrastiveLoss(model, model_m)

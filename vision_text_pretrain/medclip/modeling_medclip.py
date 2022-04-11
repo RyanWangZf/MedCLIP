@@ -37,7 +37,8 @@ class MedClipVisionModel(nn.Module):
             in_chans=1, 
             proj_dim=512,
             embed_dim=128,
-            num_heads=[4, 8, 8, 16],
+            num_heads=[4, 4, 4, 4],
+            depths=[2,2,18,2],
             window_size=8,
             checkpoint=checkpoint,
         )

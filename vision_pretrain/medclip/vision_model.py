@@ -473,7 +473,7 @@ class Uwinformer(nn.Module):
     """
 
     def __init__(self, img_size=256, patch_size=4, in_chans=1, proj_dim=512,
-                 embed_dim=128, depths=[2, 2, 6, 2], num_heads=[4, 8, 8, 16],
+                 embed_dim=128, depths=[2, 2, 18, 2], num_heads=[4, 4, 4, 4],
                  window_size=8, mlp_ratio=4., qkv_bias=True, qk_scale=None,
                  drop_rate=0., attn_drop_rate=0., drop_path_rate=0.1,
                  norm_layer=nn.LayerNorm, ape=False, patch_norm=True,
@@ -600,7 +600,10 @@ if __name__ == '__main__':
         in_chans=1, 
         proj_dim=512,
         embed_dim=128,
-        num_heads=[4, 8, 8, 16],
+        depths=[2, 2, 18, 2],
+        num_heads=[4, 4, 4, 4],
         window_size=8,
         )
     res = model(x)
+    torch.save(model.state_dict(),'ckpt.bin')
+    print('done test')
