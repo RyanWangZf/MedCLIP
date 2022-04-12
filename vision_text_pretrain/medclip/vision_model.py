@@ -532,19 +532,20 @@ class Uwinformer(nn.Module):
         self.projection_head = nn.Linear(self.num_features, proj_dim)
         self.apply(self._init_weights)
 
-        if os.path.isdir(checkpoint):
-            checkpoint = os.path.join(checkpoint, 'pytorch_model.bin')
-            state_dict = torch.load(checkpoint)
-            # remove prefix model
-            new_state_dict = {}
-            for key in state_dict.keys():
-                if 'model' in key:
-                    name = key[6:]
-                else:
-                    name = key
-                new_state_dict[name] = state_dict[key]
-            self.load_state_dict(new_state_dict)
-            print('load pretrained vision model from', checkpoint)
+        if checkpoint is not None:
+            if os.path.isdir(checkpoint):
+                checkpoint = os.path.join(checkpoint, 'pytorch_model.bin')
+                state_dict = torch.load(checkpoint)
+                # remove prefix model
+                new_state_dict = {}
+                for key in state_dict.keys():
+                    if 'model' in key:
+                        name = key[6:]
+                    else:
+                        name = key
+                    new_state_dict[name] = state_dict[key]
+                self.load_state_dict(new_state_dict)
+                print('load pretrained vision model from', checkpoint)
 
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):

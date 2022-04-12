@@ -1,7 +1,8 @@
-from cmath import isnan
 import pdb, os
 import math
+import random
 from collections import defaultdict
+import re
 
 import torch
 from torch import nn
@@ -10,8 +11,8 @@ from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
 import pandas as pd
 from PIL import Image
-
 from transformers import AutoTokenizer
+from nltk.tokenize import RegexpTokenizer
 
 os.environ['CUDA_VISIBLE_DEVICES']='1'
 
@@ -22,7 +23,7 @@ device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
 train_config = {
     'batch_size': 128,
-    'num_epochs': 3,
+    'num_epochs': 10,
     'warmup': 0.01, # the first 1% of training steps are used for warm-up
     'lr': 5e-5,
     'weight_decay': 1e-2,
@@ -44,14 +45,19 @@ class ImageTextContrastiveDataset(Dataset):
             print('load data from', filename)
             df = pd.read_csv(filename, index_col=0)
             df_list.append(df)
-        df = pd.concat(df_list, axis=0).reset_index(drop=True)
-        self.df = df
+        self.df = pd.concat(df_list, axis=0).reset_index(drop=True)
+        # split raw reports and process into sentences
+        self.df = self.create_sent_segments(self.df)
         self.transform = imgtransform
+
+        # use labeled sentences as prompts for chexpert training
         self.sentence_label = pd.read_csv('./local_data/iuxray-sentence-label.csv').fillna(0)
-        # remove duplicate reports
         self.sentence_label = self.sentence_label.drop_duplicates(subset='Reports')
-        # remove too short sentence
         self.sentence_label = self.sentence_label[self.sentence_label['Reports'].map(len)>2].reset_index(drop=True)
+        self.sentence_label['report'] = self.sentence_label['Reports']
+        self.sentence_label = self.sentence_label.drop('Reports', axis=1)
+        self.sentence_label = self.create_sent_segments(self.sentence_label)
+
         # get negative phrase sentences
         self.negative_sent_label = self.sentence_label.loc[(self.sentence_label[self._labels_] == -1).sum(1) > 0].copy()
 
@@ -59,10 +65,26 @@ class ImageTextContrastiveDataset(Dataset):
         row = self.df.iloc[index]
         img = Image.open(row.imgpath)
         img = self.transform(img).unsqueeze(1)
-        report = '' if pd.isna(row.report) else row.report
+        report = row.report # original sentences list
+
+        if len(report) == 0: # no report available
+            # sample class prompts as augmentation
+            report = self.sample_sent_prompts(row)
+        else:
+            # randomly sample one sentence
+            sent_ix = random.randint(0, len(report))
+            report = report[sent_ix]
+
+        return img, report
+            
+    def __len__(self):
+        return len(self.df)
+    
+    def sample_sent_prompts(self, row):
+        # do prompt sampling
         if (row[self._labels_] == 0).all(): # no label available, use no finding
             sampled_sent = self.sentence_label[self.sentence_label['No Finding'] > 0].sample()
-            report += ' ' + sampled_sent['Reports'].values[0]
+            report = sampled_sent['report'].values[0][0]
         else:
             # get prompt sentence x * 0 = 0, 1 * -1 = -1, 1 * 1 = 1, -1 * -1 = 1
             bool_sent_label = self.sentence_label[self._labels_] *  row[self._labels_]
@@ -73,15 +95,46 @@ class ImageTextContrastiveDataset(Dataset):
             else:
                 # random sample
                 sampled_sent = sents.sample()
-            report += ' ' + sampled_sent['Reports'].values[0]
-        
-        # randomly truncate report
-        # TODO
+            report = sampled_sent['report'].values[0][0]
+        return report
 
-        return img, report
-            
-    def __len__(self):
-        return len(self.df)
+    def create_sent_segments(self, df):
+        '''do preprocessing to split raw reports into sentence segments for
+        sentence-image contrastive pretraining.
+        '''
+        df['report'] = df['report'].apply(self._split_report_into_segment)
+        return df
+
+    def _split_report_into_segment(self, report):
+        '''clean up raw reports into sentences
+        '''
+        if pd.isnull(report):
+            return []
+        else:
+            report = report.replace('\n',' ')
+            splitter = re.compile("[0-9]+\.")
+            report = splitter.split(report)
+            reports = [point.split(".") for point in report]
+            reports = [sent for point in reports for sent in point]
+            study_sent = []
+            for sent in reports:
+                if len(sent) == 0:
+                    continue
+                
+                sent = sent.replace("\ufffd\ufffd", " ")
+                tokenizer = RegexpTokenizer(r"\w+")
+                tokens = tokenizer.tokenize(sent.lower())
+                if len(tokens) <= 1:
+                    continue
+
+                # filter tokens for current sentence
+                included_tokens = []
+                for t in tokens:
+                    t = t.encode("ascii", "ignore").decode("ascii")
+                    if len(t) > 0:
+                        included_tokens.append(t)
+                study_sent.append(" ".join(included_tokens))
+            return study_sent
 
 def collate_fn(batch):
     tokenizer = AutoTokenizer.from_pretrained('phdf33/trialbert-base')
@@ -125,16 +178,19 @@ img_transform = transforms.Compose([
     transforms.Normalize(mean=[0.5862785803043838],std=[0.27950088968644304])]
 )
 traindata = ImageTextContrastiveDataset(imgtransform=img_transform)
+
 trainloader = DataLoader(traindata, 
     batch_size=train_config['batch_size'], collate_fn=collate_fn, 
     shuffle=True,
-    pin_memory=True,
-    num_workers=12,
+    pin_memory=False,
+    num_workers=0,
     )
 
-model = MedClipModel(
-    vision_checkpoint='./checkpoints/vision_pretrain'
-    )
+# model = MedClipModel(
+#     vision_checkpoint='./checkpoints/vision_pretrain'
+#     )
+
+model = MedClipModel()
 loss_model = ImageTextContrastiveLoss(model)
 loss_model.cuda()
 train_objectives = [
