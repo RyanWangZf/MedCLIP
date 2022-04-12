@@ -1,6 +1,8 @@
 '''drawn from Gloria github: https://github.com/marshuang80/gloria
 '''
 
+BERT_TYPE = 'phdf33/trialbert-base'
+
 CHEXPERT_TASKS = [
     "No Finding",
     "Enlarged Cardiomediastinum",
@@ -118,3 +120,5 @@ CHEXPERT_CLASS_PROMPTS = {
         ],
     },
 }
+
+WEIGHTS_NAME = 'pytorch_model.bin'

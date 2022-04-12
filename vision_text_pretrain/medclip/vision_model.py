@@ -8,6 +8,7 @@ import torch.nn as nn
 import torch.utils.checkpoint as checkpoint
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
 
+from . import constants
 
 class Mlp(nn.Module):
     def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, drop=0.):
@@ -534,7 +535,7 @@ class Uwinformer(nn.Module):
 
         if checkpoint is not None:
             if os.path.isdir(checkpoint):
-                checkpoint = os.path.join(checkpoint, 'pytorch_model.bin')
+                checkpoint = os.path.join(checkpoint, constants.WEIGHTS_NAME)
                 state_dict = torch.load(checkpoint)
                 # remove prefix model
                 new_state_dict = {}

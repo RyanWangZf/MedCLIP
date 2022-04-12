@@ -1,4 +1,7 @@
 import random
+from collections import defaultdict
+
+from transformers import AutoTokenizer
 
 from . import constants
 
@@ -31,3 +34,12 @@ def generate_chexpert_class_prompts(n: int = 5):
         # TODO: we shall make use all the candidate prompts for autoprompt tuning
         prompts[k] = random.sample(cls_prompts, n)
     return prompts
+
+def process_class_prompts(cls_prompts):
+    tokenizer = AutoTokenizer.from_pretrained(constants.BERT_TYPE)
+    tokenizer.model_max_length = 77
+    cls_prompt_inputs = defaultdict()
+    for k,v in cls_prompts.items():
+        text_inputs = tokenizer(v, truncation=True, padding=True, return_tensors='pt')
+        cls_prompt_inputs[k] = text_inputs
+    return cls_prompt_inputs

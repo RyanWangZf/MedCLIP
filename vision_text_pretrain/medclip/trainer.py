@@ -3,6 +3,7 @@ import json
 import pdb
 from typing import List, Dict, Tuple, Iterable, Type, Union, Callable, Optional
 from collections import defaultdict
+import math
 
 import numpy as np
 import torch
@@ -223,6 +224,7 @@ class Trainer:
         steps_per_epoch = None,
         scheduler: str = 'WarmupCosine',
         warmup_steps: int = 10000,
+        warmup_ratio: float = 0.01,
         optimizer_class: Type[Optimizer] = transformers.AdamW,
         optimizer_params : Dict[str, object]= {'lr': 2e-5},
         weight_decay: float = 0.01,
@@ -232,6 +234,7 @@ class Trainer:
         save_best_model: bool = True,
         max_grad_norm: float = 1,
         use_amp: bool = False,
+        accumulation_steps: int = 1,
         callback: Callable[[float, int, int], None] = None,
         show_progress_bar: bool = True,
         checkpoint_path: str = None,
@@ -242,6 +245,7 @@ class Trainer:
         checkpoint_path: model load and continue to learn path
         '''
         self.best_score = -9999999
+        self.accumulation_steps = accumulation_steps
         if use_amp:
             from torch.cuda.amp import autocast
             scaler = torch.cuda.amp.GradScaler()
@@ -253,10 +257,12 @@ class Trainer:
         dataloaders = [dataloader for dataloader,_,_ in train_objectives]
         if steps_per_epoch is None or steps_per_epoch == 0:
             steps_per_epoch = min([len(dataloader) for dataloader in dataloaders])
-        num_train_steps = int(steps_per_epoch * epochs)
+        num_train_steps = int((steps_per_epoch) * epochs)
+        warmup_steps = math.ceil(num_train_steps * warmup_ratio) #10% of train data for warm-up
+
         loss_models = [loss for _, loss,_ in train_objectives]
         train_weights = [weight for _,_,weight in train_objectives]
-        
+
         # Prepare optimizers
         optimizers = []
         schedulers = []
@@ -288,8 +294,8 @@ class Trainer:
         train_loss_dict = defaultdict(list)
         for epoch in trange(epochs, desc="Epoch", disable=not show_progress_bar):
             training_steps = 0
+            for train_iter in trange(steps_per_epoch, desc="Iteration", smoothing=0.05, disable=not show_progress_bar):
 
-            for _ in trange(steps_per_epoch, desc="Iteration", smoothing=0.05, disable=not show_progress_bar):
                 # check if model parameters keep same
                 for train_idx in range(num_train_objectives):
                     loss_model = loss_models[train_idx]
@@ -312,6 +318,7 @@ class Trainer:
                         with autocast():
                             loss_model_return = loss_model(**data)
                         loss_value = loss_weight * loss_model_return['loss_value']
+                        loss_value = loss_value
                         scale_before_step = scaler.get_scale()
                         scaler.scale(loss_value).backward()
                         scaler.unscale_(optimizer)
@@ -321,18 +328,13 @@ class Trainer:
                         skip_scheduler = scaler.get_scale() != scale_before_step
                     else:
                         loss_model_return = loss_model(**data)
-                        loss_value = loss_weight * loss_model_return['loss_value']
+                        loss_value = loss_weight * loss_model_return['loss_value'] / self.accumulation_steps
                         loss_value.backward()
                         torch.nn.utils.clip_grad_norm_(loss_model.parameters(), max_grad_norm)
                         optimizer.step()
 
                     train_loss_dict[train_idx].append(loss_value.item())
                     optimizer.zero_grad()
-
-                # for all train objectives we only use one embedding to update image embedding    
-                if self.evaluator is not None:
-                    # update image embeddings
-                    self.evaluator.update_memory(loss_model_return)
 
                 if not skip_scheduler:
                     scheduler.step()

@@ -6,11 +6,13 @@ from torch import nn
 from transformers import AutoModel, AutoTokenizer
 import numpy as np
 
+
 from .vision_model import Uwinformer
+from . import constants
 
 class MedClipTextModel(nn.Module):
     def __init__(self, 
-        bert_type='phdf33/trialbert-base',
+        bert_type=constants.BERT_TYPE,
         proj_dim = 512) -> None:
         super().__init__()
         self.bert_type = bert_type
@@ -54,12 +56,21 @@ class MedClipVisionModel(nn.Module):
 
 class MedClipModel(nn.Module):
     def __init__(self,
+        checkpoint=None,
         vision_checkpoint=None,
+        logit_scale_init_value=0.07,
         ) -> None:
         super().__init__()
         self.vision_model = MedClipVisionModel(checkpoint=vision_checkpoint)
         self.text_model = MedClipTextModel()
-        self.contrast_temperature =1
+
+        # learnable temperature for contrastive loss        
+        self.logit_scale = nn.Parameter(torch.log(torch.tensor(1/logit_scale_init_value)))
+
+        if checkpoint is not None:
+            state_dict = torch.load(os.path.join(checkpoint, constants.WEIGHTS_NAME))
+            self.load_state_dict(state_dict)
+            print('load model weight from:', checkpoint)
 
     def forward(self, 
         input_ids=None,
@@ -79,10 +90,14 @@ class MedClipModel(nn.Module):
         # text encoder
         text_embeds = self.text_model(input_ids, attention_mask)
 
+        # cosine similarity as logits, clamp logit scale for stability
+        self.logit_scale.data = torch.clamp(self.logit_scale.data, 0, 4.6052)
+        logit_scale = self.logit_scale.exp()
+        
         # (n, d) dot (d, m) -> (n, m)
-        logits_per_text = torch.matmul(text_embeds, img_embeds.t())
+        logits_per_text = torch.matmul(text_embeds, img_embeds.t()) * logit_scale
         # (m, n): row 0: image to texts
-        logits_per_text = logits_per_text.T
+        logits_per_image = logits_per_text.T
 
         if return_loss:
             loss = self.clip_loss(logits_per_text)
@@ -90,7 +105,7 @@ class MedClipModel(nn.Module):
             loss = None
         
         return {'img_embeds':img_embeds, 'text_embeds':text_embeds,
-            'logits':logits_per_text, 'loss_value':loss}
+            'logits':logits_per_image, 'loss_value':loss, 'logits_per_text':logits_per_text}
 
     def clip_loss(self, similarity: torch.Tensor) -> torch.Tensor:
         caption_loss = self.contrastive_loss(similarity)
