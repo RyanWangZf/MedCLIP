@@ -246,7 +246,7 @@ class Trainer:
             from torch.cuda.amp import autocast
             scaler = torch.cuda.amp.GradScaler()
         
-        self.score_logs = {}
+        self.score_logs = defaultdict(list)
         self.evaluator = evaluator
         self.eval_dataloader = eval_dataloader
 
@@ -352,8 +352,11 @@ class Trainer:
                     for key in scores.keys(): print('{}: {:.4f}'.format(key, scores[key]))
                     save_dir =  os.path.join(output_path, f'{global_step}/')
                     self._save_ckpt(model, save_dir)
-                    self.score_logs[global_step] = scores['ROUGE_L']
-                    self.evaluator.reset_memory() # reset image embedding memory
+
+                    # score logs save the list of scores
+                    self.score_logs['global_step'].append(global_step)
+                    for key in scores.keys():
+                        self.score_logs[key].append(scores[key])
                 
                 if self.evaluator is None and global_step % save_steps == 0:
                     state_dict = model.state_dict()
@@ -364,14 +367,15 @@ class Trainer:
         if save_best_model:
             import pandas as pd
             from distutils.dir_util import copy_tree
-            res = pd.Series(self.score_logs)
-            best_iter = res.index(res.argmax())
-            best_score = res.max()
+            res = pd.DataFrame(self.score_logs)
+            res = res.set_index('global_step')
+            # take the average column best
+            best_iter = res.mean(1).idxmax()
             best_save_path = os.path.join(output_path, './best')
             if not os.path.exists(best_save_path): os.makedirs(best_save_path)
             best_origin_path = os.path.join(output_path, f'./{best_iter}')
-            print(f'save best checkpoint at iter {best_iter} [ROUGE_L] {best_score} to', best_save_path)
-            copy_tree(best_origin_path,best_save_path)
+            print(f'save best checkpoint at iter {best_iter} to', best_save_path)
+            copy_tree(best_origin_path, best_save_path)
 
         if eval_dataloader is None and output_path is not None:   #No evaluator, but output path: save final model version
             state_dict = model.state_dict()

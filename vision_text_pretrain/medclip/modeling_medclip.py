@@ -4,6 +4,7 @@ import os
 import torch
 from torch import nn
 from transformers import AutoModel, AutoTokenizer
+import numpy as np
 
 from .vision_model import Uwinformer
 
@@ -78,7 +79,9 @@ class MedClipModel(nn.Module):
         # text encoder
         text_embeds = self.text_model(input_ids, attention_mask)
 
+        # (n, d) dot (d, m) -> (n, m)
         logits_per_text = torch.matmul(text_embeds, img_embeds.t())
+        # (m, n): row 0: image to texts
         logits_per_text = logits_per_text.T
 
         if return_loss:
@@ -96,3 +99,39 @@ class MedClipModel(nn.Module):
 
     def contrastive_loss(self, logits: torch.Tensor) -> torch.Tensor:
         return nn.functional.cross_entropy(logits, torch.arange(len(logits), device=logits.device))
+
+class MedClipPromptClassifier(nn.Module):
+    '''take MedCLIP model with prompts for zero-shot classification
+    '''
+    def __init__(self, medclip_model) -> None:
+        super().__init__()
+        self.model = medclip_model
+
+    def forward(self, pixel_values=None, prompt_inputs=None, **kwargs):
+        '''take image pixel values (after transform) and prompt_inputs 
+        (a dict of {'class1':{'input_ids':...,'attention_mask':,...}), 'class2':...}
+        '''
+        pixel_values = pixel_values.cuda()
+        class_similarities = []
+        class_names = []
+        for cls_name, cls_text in prompt_inputs.items():
+            inputs = {'pixel_values':pixel_values}
+            for k in cls_text.keys(): inputs[k] = cls_text[k].cuda()
+
+            # TODO: 
+            # take soft mask over class_prompts to reach the similarities to classes
+            medclip_outputs = self.model(**inputs)
+            logits = medclip_outputs['logits']
+
+            # take logits max as the class similarity
+            cls_sim = torch.max(logits, 1)[0]
+            class_similarities.append(cls_sim)
+            class_names.append(cls_name)
+        
+        class_similarities = torch.stack(class_similarities, 1)
+        outputs = {
+            'logits': class_similarities,
+            'class_names': class_names,
+        }
+        return outputs
+
