@@ -1,12 +1,8 @@
 import pdb, os
-import math
 import random
 
 import numpy as np
-import pandas as pd
 import torch
-from torch import nn
-import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 from medclip.modeling_medclip import MedClipModel, MedClipPromptClassifier
@@ -15,7 +11,6 @@ from medclip.dataset import ImageTextContrastiveCollator, ZeroShotImageCollator
 from medclip.losses import ImageTextContrastiveLoss
 from medclip.trainer import Trainer
 from medclip.evaluator import Evaluator
-
 
 # set random seed
 seed = 42
@@ -32,14 +27,14 @@ device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
 # set training configurations
 train_config = {
-    'batch_size': 100,
-    'num_epochs': 32,
-    'warmup': 0.01, # the first 1% of training steps are used for warm-up
-    'lr': 1e-4,
+    'batch_size': 128,
+    'num_epochs': 50,
+    'warmup': 0.1, # the first 10% of training steps are used for warm-up
+    'lr': 5e-5,
     'weight_decay': 1e-4,
     'eval_batch_size': 128,
-    'eval_steps': 500,
-    'save_steps': 500,
+    'eval_steps': 1000,
+    'save_steps': 1000,
 }
 
 # only pretrain on chexpert train data and mimic-cxr data
@@ -59,9 +54,7 @@ trainloader = DataLoader(traindata,
     )
 
 # build medclip model
-model = MedClipModel(
-    vision_checkpoint='./checkpoints/vision_pretrain'
-    )
+model = MedClipModel()
 model.cuda()
 
 # build evaluator

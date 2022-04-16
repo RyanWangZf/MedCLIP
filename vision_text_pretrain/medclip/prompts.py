@@ -5,7 +5,7 @@ from transformers import AutoTokenizer
 
 from . import constants
 
-def generate_chexpert_class_prompts(n: int = 5):
+def generate_chexpert_class_prompts(n = None):
     """Generate text prompts for each CheXpert classification task
     Parameters
     ----------
@@ -32,7 +32,11 @@ def generate_chexpert_class_prompts(n: int = 5):
 
         # randomly sample n prompts for zero-shot classification
         # TODO: we shall make use all the candidate prompts for autoprompt tuning
-        prompts[k] = random.sample(cls_prompts, n)
+        if n is not None and n < len(cls_prompts):
+            prompts[k] = random.sample(cls_prompts, n)
+        else:
+            prompts[k] = cls_prompts
+        print(f'sample {len(prompts[k])} num of prompts for {k} from total {len(cls_prompts)}')
     return prompts
 
 def process_class_prompts(cls_prompts):

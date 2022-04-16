@@ -36,7 +36,7 @@ class ImageTextContrastiveDataset(Dataset):
 
         if imgtransform is None:
             self.transform = transforms.Compose([
-                transforms.Resize((256,256)),
+                transforms.Resize((constants.IMG_SIZE,constants.IMG_SIZE)),
                 transforms.ToTensor(),
                 transforms.Normalize(mean=[0.5862785803043838],std=[0.27950088968644304])]
             )
@@ -44,7 +44,8 @@ class ImageTextContrastiveDataset(Dataset):
             self.transform = imgtransform
 
         # use labeled sentences as prompts for chexpert training
-        self.sentence_label = pd.read_csv('./local_data/iuxray-sentence-label.csv').fillna(0)
+        self.sentence_label = pd.read_csv('./local_data/sentence-label.csv', index_col=0).fillna(0)
+        print('load sentence prompts from ./local_data/sentence-label.csv')
         self.sentence_label = self.sentence_label.drop_duplicates(subset='Reports')
         self.sentence_label = self.sentence_label[self.sentence_label['Reports'].map(len)>2].reset_index(drop=True)
         self.sentence_label['report'] = self.sentence_label['Reports']
@@ -52,24 +53,23 @@ class ImageTextContrastiveDataset(Dataset):
         self.sentence_label = self.create_sent_segments(self.sentence_label)
         self.sentence_label = self.sentence_label[~(self.sentence_label['report'].map(len)==0)]
 
-        # get negative phrase sentences
-        self.negative_sent_label = self.sentence_label.loc[(self.sentence_label[self._labels_] == -1).sum(1) > 0].copy()
-
     def __getitem__(self, index):
         row = self.df.iloc[index]
         img = Image.open(row.imgpath)
         img = self.transform(img).unsqueeze(1)
         report = row.report # original sentences list
-
+        img_label = row[self._labels_].values # image corresponds to text labels
         if len(report) == 0: # no report available
             # sample class prompts as augmentation
-            report = self.sample_sent_prompts(row)
+            report, text_label = self.sample_sent_prompts(row)
         else:
             # randomly sample one sentence
             sent_ix = random.randint(0, len(report)-1)
             report = report[sent_ix]
-
-        return img, report
+            # TODO: now we simply take one sentence from the whole report same label as the report
+            # we need to use sentence-level label instead
+            text_label = img_label
+        return img, report, img_label, text_label
             
     def __len__(self):
         return len(self.df)
@@ -79,6 +79,7 @@ class ImageTextContrastiveDataset(Dataset):
         if (row[self._labels_] == 0).all(): # no label available, use no finding
             sampled_sent = self.sentence_label[self.sentence_label['No Finding'] > 0].sample()
             report = sampled_sent['report'].values[0][0]
+            label = sampled_sent[self._labels_].values[0]
         else:
             # get prompt sentence x * 0 = 0, 1 * -1 = -1, 1 * 1 = 1, -1 * -1 = 1
             bool_sent_label = self.sentence_label[self._labels_] *  row[self._labels_]
@@ -89,12 +90,10 @@ class ImageTextContrastiveDataset(Dataset):
             else:
                 # random sample
                 sampled_sent = sents.sample()
-            try:
-                report = sampled_sent['report'].values[0][0]
-            except:
-                pdb.set_trace()
-                pass
-        return report
+            
+            report = sampled_sent['report'].values[0][0]
+            label = sampled_sent[self._labels_].values.flatten()
+        return report, label
 
     def create_sent_segments(self, df):
         '''do preprocessing to split raw reports into sentence segments for
@@ -144,8 +143,13 @@ class ImageTextContrastiveCollator:
         for data in batch:
             inputs['pixel_values'].append(data[0])
             report_list.append(data[1])
+            inputs['img_labels'].append(data[2])
+            inputs['text_labels'].append(data[3])
         text_inputs = self.tokenizer(report_list, truncation=True, padding=True, return_tensors='pt')
         inputs['pixel_values'] = torch.cat(inputs['pixel_values'], 0)
+        if inputs['pixel_values'].shape[1] == 1: inputs['pixel_values'] = inputs['pixel_values'].repeat((1,3,1,1))
+        inputs['img_labels'] = torch.tensor(np.stack(inputs['img_labels']).astype(float))
+        inputs['text_labels'] = torch.tensor(np.stack(inputs['text_labels']).astype(float))
         inputs['input_ids'] = text_inputs['input_ids']
         inputs['attention_mask'] = text_inputs['attention_mask']
         return inputs
@@ -161,7 +165,7 @@ class ZeroShotImageDataset(Dataset):
 
         if imgtransform is None:
             self.transform = transforms.Compose([
-                transforms.Resize((256,256)),
+                transforms.Resize((constants.IMG_SIZE,constants.IMG_SIZE)),
                 transforms.ToTensor(),
                 transforms.Normalize(mean=[0.5862785803043838],std=[0.27950088968644304])]
             )
@@ -187,13 +191,13 @@ class ZeroShotImageDataset(Dataset):
         return len(self.df)
 
 class ZeroShotImageCollator:
-    def __init__(self, cls_prompts=None):
+    def __init__(self, cls_prompts=None, n_prompt=5):
         # initialize tokenizer
         self.tokenizer = AutoTokenizer.from_pretrained(constants.BERT_TYPE)
         self.tokenizer.model_max_length = 77
 
         if cls_prompts is None:
-            self.cls_prompts = generate_chexpert_class_prompts()
+            self.cls_prompts = generate_chexpert_class_prompts(n=n_prompt)
         else:
             self.cls_prompts = cls_prompts
 
@@ -206,6 +210,7 @@ class ZeroShotImageCollator:
             inputs['pixel_values'].append(data[0])
             inputs['labels'].append(data[1])
         inputs['pixel_values'] = torch.cat(inputs['pixel_values'], 0)
+        if inputs['pixel_values'].shape[1] == 1: inputs['pixel_values'] = inputs['pixel_values'].repeat((1,3,1,1))
         return {
             'pixel_values': inputs['pixel_values'], 
             'prompt_inputs': self.prompt_texts_inputs,

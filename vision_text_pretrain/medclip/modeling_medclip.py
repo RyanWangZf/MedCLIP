@@ -23,35 +23,28 @@ class MedClipTextModel(nn.Module):
     
     def forward(self, input_ids, attention_mask):
         output = self.model(input_ids=input_ids, attention_mask=attention_mask)
-        last_hidden_states = torch.stack(output[2][-self.last_n_layer:]) # n_layer, batch, seqlen, emb_dim
+        last_hidden_states = torch.stack(output['hidden_states'][-self.last_n_layer:]) # n_layer, batch, seqlen, emb_dim
         embed = last_hidden_states.permute(1,0,2,3)
-        embed = embed.mean(1)
-        embed = self.projection_head(embed).mean(1)
-        embed = embed / embed.norm(dim=-1, keepdim=True)
+        embed = embed.mean(1).mean(1) # pooling
+        embed = self.projection_head(embed)
         return embed
 
 class MedClipVisionModel(nn.Module):
+    '''take an VIT model as the backbone.
+    '''
     def __init__(self, checkpoint=None) -> None:
         super().__init__()
-        self.vit_type = 'uwinformer'
-        self.model = Uwinformer(
-            img_size=256, 
-            patch_size=4,
-            in_chans=1, 
-            proj_dim=512,
-            embed_dim=128,
-            num_heads=[4, 4, 4, 4],
-            depths=[2,2,18,2],
-            window_size=8,
-            checkpoint=checkpoint,
-        )
+        self.vit_type = constants.VIT_TYPE
+        self.model = AutoModel.from_pretrained(self.vit_type)
+        self.projection_head = nn.Linear(768, 512, bias=False)
 
     def forward(self, pixel_values):
         '''args:
-        pixel_values: tensor with shape [bs, 1, img_size, img_size]
+        pixel_values: tensor with shape [bs, 3, img_size, img_size]
         '''
+        if pixel_values.shape[1] == 1: pixel_values = pixel_values.repeat((1,3,1,1))
         output = self.model(pixel_values)
-        img_embeds = output / output.norm(dim=-1, keepdim=True)
+        img_embeds = self.projection_head(output['pooler_output'])
         return img_embeds
 
 class MedClipModel(nn.Module):
@@ -89,6 +82,7 @@ class MedClipModel(nn.Module):
 
         # text encoder
         text_embeds = self.text_model(input_ids, attention_mask)
+        text_embeds = text_embeds / text_embeds.norm(dim=-1, keepdim=True)
 
         # cosine similarity as logits, clamp logit scale for stability
         self.logit_scale.data = torch.clamp(self.logit_scale.data, 0, 4.6052)
@@ -139,7 +133,8 @@ class MedClipPromptClassifier(nn.Module):
             logits = medclip_outputs['logits']
 
             # take logits max as the class similarity
-            cls_sim = torch.max(logits, 1)[0]
+            # cls_sim = torch.max(logits, 1)[0] # equivalent use only one prompt
+            cls_sim = torch.mean(logits, 1) # equivalent to prompt ensembling
             class_similarities.append(cls_sim)
             class_names.append(cls_name)
         

@@ -261,7 +261,6 @@ class SwinTransformerBlock(nn.Module):
         # FFN
         x = shortcut + self.drop_path(x)
         x = x + self.drop_path(self.mlp(self.norm2(x)))
-
         return x
 
     def extra_repr(self) -> str:
@@ -295,9 +294,8 @@ class PatchMerging(nn.Module):
         super().__init__()
         self.input_resolution = input_resolution
         self.dim = dim
-        # self.reduction = nn.Linear(4 * dim, 2 * dim, bias=False)
-        self.reduction = nn.Linear(4 * dim, dim, bias=False)
-
+        self.reduction = nn.Linear(4 * dim, 2 * dim, bias=False)
+        # self.reduction = nn.Linear(4 * dim, dim, bias=False)
         self.norm = norm_layer(4 * dim)
 
     def forward(self, x):
@@ -388,6 +386,7 @@ class BasicLayer(nn.Module):
                 x = blk(x)
         if self.downsample is not None:
             x = self.downsample(x)
+        # print(x.shape)
         return x
 
     def extra_repr(self) -> str:
@@ -484,10 +483,11 @@ class Uwinformer(nn.Module):
         self.proj_dim = proj_dim
         self.num_layers = len(depths)
         self.embed_dim = embed_dim
+        self.block_embed_dims = [2**i for i in range(self.num_layers)]
         self.ape = ape
         self.patch_norm = patch_norm
-        # self.num_features = int(embed_dim * 2 ** (self.num_layers - 1))
-        self.num_features = int(embed_dim * self.num_layers)
+        self.num_features = int(embed_dim * 2 ** (self.num_layers - 1))
+        # self.num_features = int(embed_dim * sum(self.block_embed_dims)) # 128 * (1+2+4+8) = 1440
         self.mlp_ratio = mlp_ratio
 
         # split image into non-overlapping patches
@@ -513,7 +513,7 @@ class Uwinformer(nn.Module):
         for i_layer in range(self.num_layers):
 
             # layer = BasicLayer(dim=int(embed_dim * 2 ** i_layer),
-            layer = BasicLayer(dim = embed_dim,
+            layer = BasicLayer(dim=int(embed_dim * self.block_embed_dims[i_layer]),
                                input_resolution=(patches_resolution[0] // (2 ** i_layer),
                                                  patches_resolution[1] // (2 ** i_layer)),
                                depth=depths[i_layer],
@@ -524,10 +524,9 @@ class Uwinformer(nn.Module):
                                drop=drop_rate, attn_drop=attn_drop_rate,
                                drop_path=dpr[sum(depths[:i_layer]):sum(depths[:i_layer + 1])],
                                norm_layer=norm_layer,
-                               downsample=PatchMerging if (i_layer < self.num_layers - 1) else None,
+                               downsample=PatchMerging if (i_layer < self.num_layers-1) else None,
                                use_checkpoint=use_checkpoint)
             self.layers.append(layer)
-
         self.norm = norm_layer(self.num_features)
         self.avgpool = nn.AdaptiveAvgPool1d(1)
         self.projection_head = nn.Linear(self.num_features, proj_dim)
@@ -578,18 +577,19 @@ class Uwinformer(nn.Module):
             feat_list.append(x_res)
         
         # feat_list = [
-        # (bs, 1024, 128),
-        # (bs, 256, 128),
-        # (bs, 64, 128),
-        # (bs, 64, 128),
+        # (bs, 1024, 192),
+        # (bs, 256, 384),
+        # (bs, 64, 768),
+        # (bs, 64, 768),
         # ]
         # global pooling over dim = 1
         # concat these low-level features dim = 1
-        # feat_list now is (bs, 1, 512)
+        # feat_list now is (bs, 1, 192+384+768+768=2112)
         # take norm over dim = -1
         # add projection head with two layers
         # proj_feat now is (bs, proj_dim) for contrastive learning
-        feat = torch.cat(feat_list, 1).squeeze(-1)
+        # feat = torch.cat(feat_list, 1).squeeze(-1)
+        feat = x_res.squeeze(-1)
         feat = self.norm(feat)
         return feat
 
@@ -607,18 +607,17 @@ class Uwinformer(nn.Module):
         flops += self.num_features * self.num_classes
         return flops
     
-    
-
 if __name__ == '__main__':
     # test
     x = torch.randn(2,1,256,256)
     model = Uwinformer(
         img_size=256, 
-        patch_size=4, 
-        in_chans=1, 
+        patch_size=4,
+        in_chans=1,
         proj_dim=512,
-        embed_dim=128,
-        num_heads=[4, 8, 8, 16],
+        embed_dim=96,
+        depths=[2,2,6,2],
+        num_heads=[3, 6, 12, 24],
         window_size=8,
         )
     res = model(x)

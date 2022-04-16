@@ -1,7 +1,10 @@
 '''drawn from Gloria github: https://github.com/marshuang80/gloria
 '''
 
-BERT_TYPE = 'phdf33/trialbert-base'
+BERT_TYPE = 'emilyalsentzer/Bio_ClinicalBERT'
+VIT_TYPE = 'microsoft/swin-tiny-patch4-window7-224'
+
+IMG_SIZE = 224
 
 CHEXPERT_TASKS = [
     "No Finding",
