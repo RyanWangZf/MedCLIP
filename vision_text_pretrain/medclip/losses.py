@@ -41,6 +41,7 @@ class ImageTextContrastiveLoss(nn.Module):
             logits = outputs['logits']
 
             # compute soft-labels
+            # TODO: [zw] it seems similarity score of -1 is better than 0? However, the softmax is doing the opposite.
             label_sim = torch.matmul(img_labels, text_labels.T)
             label_sim = torch.clamp(label_sim, -1,1)
             label_sim = label_sim.to(logits.device)
