@@ -9,7 +9,7 @@ import torch
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
 from transformers import AutoTokenizer
-from nltk.tokenize import RegexpTokenizer
+import nltk
 from PIL import Image
 
 from .prompts import process_class_prompts
@@ -70,10 +70,10 @@ class ImageTextContrastiveDataset(Dataset):
             # we need to use sentence-level label instead
             text_label = img_label
         return img, report, img_label, text_label
-            
+
     def __len__(self):
         return len(self.df)
-    
+
     def sample_sent_prompts(self, row):
         # do prompt sampling
         if (row[self._labels_] == 0).all(): # no label available, use no finding
@@ -90,7 +90,7 @@ class ImageTextContrastiveDataset(Dataset):
             else:
                 # random sample
                 sampled_sent = sents.sample()
-            
+
             report = sampled_sent['report'].values[0][0]
             label = sampled_sent[self._labels_].values.flatten()
         return report, label
@@ -109,18 +109,17 @@ class ImageTextContrastiveDataset(Dataset):
             return []
         else:
             report = report.replace('\n',' ')
-            splitter = re.compile("[0-9]+\.")
+            splitter = re.compile("[0-9]+\.+[^0-9]")
             report = splitter.split(report)
-            reports = [point.split(".") for point in report]
+            reports = [point.split(". ") for point in report]
             reports = [sent for point in reports for sent in point]
             study_sent = []
             for sent in reports:
                 if len(sent) == 0:
                     continue
-                
+
                 sent = sent.replace("\ufffd\ufffd", " ")
-                tokenizer = RegexpTokenizer(r"\w+")
-                tokens = tokenizer.tokenize(sent.lower())
+                tokens = nltk.wordpunct_tokenize(sent.lower())
                 if len(tokens) <= 1:
                     continue
 
@@ -186,7 +185,7 @@ class ZeroShotImageDataset(Dataset):
         img = self.transform(img).unsqueeze(1)
         label = row[row == 1].index[0]
         return img, label
-    
+
     def __len__(self):
         return len(self.df)
 
@@ -212,7 +211,7 @@ class ZeroShotImageCollator:
         inputs['pixel_values'] = torch.cat(inputs['pixel_values'], 0)
         if inputs['pixel_values'].shape[1] == 1: inputs['pixel_values'] = inputs['pixel_values'].repeat((1,3,1,1))
         return {
-            'pixel_values': inputs['pixel_values'], 
+            'pixel_values': inputs['pixel_values'],
             'prompt_inputs': self.prompt_texts_inputs,
             'labels': inputs['labels'],
             }
