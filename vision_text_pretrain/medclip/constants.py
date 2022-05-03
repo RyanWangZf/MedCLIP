@@ -5,6 +5,8 @@ BERT_TYPE = 'emilyalsentzer/Bio_ClinicalBERT'
 VIT_TYPE = 'microsoft/swin-tiny-patch4-window7-224'
 
 IMG_SIZE = 224
+IMG_MEAN = .5862785803043838
+IMG_STD = .27950088968644304
 
 CHEXPERT_TASKS = [
     "No Finding",
@@ -29,7 +31,6 @@ CHEXPERT_COMPETITION_TASKS = [
     "Edema",
     "Pleural Effusion",
 ]
-
 CHEXPERT_CLASS_PROMPTS = {
     "Atelectasis": {
         "severity": ["", "mild", "minimal"],
@@ -123,5 +124,23 @@ CHEXPERT_CLASS_PROMPTS = {
         ],
     },
 }
+
+COVID_TASKS = [
+    'Normal',
+    'COVID',
+]
+COVID_CLASS_PROMPTS = {
+    'COVID': {
+        'adjective': ['patchy','confluent'],
+        'description': ['ground glass'],
+        'subtype': ['opacity', 'consolidation'],
+        'location': ['in peripheral', 'in mid', 'in lower'],
+    }
+}
+
+RSNA_TASKS = [
+    'Normal',
+    'Pneumonia',
+]
 
 WEIGHTS_NAME = 'pytorch_model.bin'

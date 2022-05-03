@@ -4,6 +4,7 @@ import random
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
+from torchvision import transforms
 
 from medclip.modeling_medclip import MedClipModel, MedClipPromptClassifier
 from medclip.dataset import ImageTextContrastiveDataset, ZeroShotImageDataset
@@ -11,6 +12,7 @@ from medclip.dataset import ImageTextContrastiveCollator, ZeroShotImageCollator
 from medclip.losses import ImageTextContrastiveLoss
 from medclip.trainer import Trainer
 from medclip.evaluator import Evaluator
+from medclip import constants
 
 # set random seed
 seed = 42
@@ -27,10 +29,10 @@ device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
 # set training configurations
 train_config = {
-    'batch_size': 128,
-    'num_epochs': 50,
+    'batch_size': 100,
+    'num_epochs': 10,
     'warmup': 0.1, # the first 10% of training steps are used for warm-up
-    'lr': 5e-5,
+    'lr': 5e-5, 
     'weight_decay': 1e-4,
     'eval_batch_size': 128,
     'eval_steps': 1000,
@@ -43,7 +45,18 @@ datalist = [
     'chexpert-train',
     'mimic-cxr',
 ]
-traindata = ImageTextContrastiveDataset(datalist=datalist)
+
+transform = transforms.Compose([
+                transforms.RandomHorizontalFlip(0.5),
+                transforms.ColorJitter(0.2,0.2),
+                transforms.RandomAffine(degrees=10, scale=(0.8,1.1), translate=(0.0625,0.0625)),
+                transforms.Resize((256, 256)),
+                transforms.RandomCrop((constants.IMG_SIZE, constants.IMG_SIZE)),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[constants.IMG_MEAN],std=[constants.IMG_STD])],
+            )
+
+traindata = ImageTextContrastiveDataset(datalist=datalist, imgtransform=transform)
 train_collate_fn = ImageTextContrastiveCollator()
 trainloader = DataLoader(traindata, 
     batch_size=train_config['batch_size'], 
@@ -58,19 +71,21 @@ model = MedClipModel()
 model.cuda()
 
 # build evaluator
-val_data = ZeroShotImageDataset(['chexpert-5x200'])
-val_collate_fn = ZeroShotImageCollator()
+val_data = ZeroShotImageDataset(['chexpert-5x200'],
+    class_names=constants.CHEXPERT_COMPETITION_TASKS)
+val_collate_fn = ZeroShotImageCollator(mode='multiclass')
 eval_dataloader = DataLoader(val_data,
     batch_size=train_config['eval_batch_size'],
     collate_fn=val_collate_fn,
     shuffle=False,
     pin_memory=True,
-    num_workers=0,
+    num_workers=4,
     )
 medclip_clf = MedClipPromptClassifier(model)
 evaluator = Evaluator(
     medclip_clf=medclip_clf,
     eval_dataloader=eval_dataloader,
+    mode='multiclass',
 )
 
 # build loss models and start training
