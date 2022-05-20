@@ -1,342 +1,391 @@
-from multiprocessing.sharedctypes import Value
-import os
+import re
+import random
 from collections import defaultdict
 import pdb
-import itertools
 
-from PIL import Image
-import torch
-from torch.utils.data import Dataset, DataLoader
-from torchvision.io import read_image
-from transformers import CLIPProcessor, CLIPModel, CLIPFeatureExtractor, CLIPTokenizer
-
-import pandas as pd
 import numpy as np
+import pandas as pd
+import torch
+from torch.utils.data import DataLoader, Dataset
+from torch import nn
+from torchvision import transforms
+from transformers import AutoTokenizer
+from nltk.tokenize import RegexpTokenizer
+from PIL import Image
+from sklearn.preprocessing import OrdinalEncoder
 
-from .feature_extractor import MedCLIPFeatureExtractor
 
-class IUXRayDataset(Dataset):
-    '''
-    # how to crop raw images into patches
-    res=rearrange(x_frontal[:,None,:9*224,:11*224], 'b c (h p1) (w p2) -> b (h w c) p1 p2', p1=224,p2=224)
-    '''
-    _report_sections_ = ['findings','impression']
-    _label_section_ = ['MeSH']
-    channel_num = 1 # XRay is a gray scale image
-    img_mean = [0.5862785803043838]
-    img_std = [0.27950088968644304]
-    def __init__(self, datadir, mode=None):
+from .prompts import process_class_prompts
+from .prompts import generate_chexpert_class_prompts
+from . import constants
+
+# TODO
+# 1. mixup?
+# 2. autoaugment?
+
+class ImageTextContrastiveDataset(Dataset):
+    _labels_ = ['No Finding', 'Enlarged Cardiomediastinum', 'Cardiomegaly', 'Lung Lesion', 'Lung Opacity', 'Edema', 'Consolidation', 'Pneumonia', 'Atelectasis', 'Pneumothorax', 'Pleural Effusion', 'Pleural Other', 'Fracture', 'Support Devices']
+    def __init__(self, datalist=['chexpert', 'mimic-cxr', 'iuxray'], imgtransform=None) -> None:
+        '''support data list in iuxray, mimic-cxr, chexpert
+        '''
+        super().__init__()
+        # imgpath, subject_id, report, labels...(14 labels)
+        df_list = []
+        for data in datalist:
+            filename = f'./local_data/{data}-meta.csv'
+            print('load data from', filename)
+            df = pd.read_csv(filename, index_col=0)
+            df_list.append(df)
+        self.df = pd.concat(df_list, axis=0).reset_index(drop=True)
         
-        assert mode in ['train','test','val']
-        self.image_dir = os.path.join(datadir, './images/images_normalized')
-        projection = pd.read_csv(os.path.join(datadir, 'indiana_projections.csv'), index_col=0)
-        reports = pd.read_csv(os.path.join(datadir, f'./{mode}/indiana_reports.csv'), index_col=0)
+        # split raw reports and process into sentences
+        self.df = self.create_sent_segments(self.df)
 
-        # drop NaN findings and impressions
-        not_null_idx = ~(reports['findings'].isnull() * reports['impression'].isnull())
-        reports = reports[not_null_idx][self._report_sections_ + self._label_section_]
-        df_frontal = projection[projection['projection']=='Frontal']
-        df_lateral = projection[projection['projection']=='Lateral']
-
-        self.uid2frontal = defaultdict(list)
-        self.uid2lateral = defaultdict(list)
-
-        for idx in reports.index.tolist():
-            if idx in df_frontal.index:
-                names = df_frontal.loc[idx].filename
-                if isinstance(names, str): self.uid2frontal[idx].append(os.path.join(self.image_dir, names))
-                else: self.uid2frontal[idx].extend([os.path.join(self.image_dir,name) for name in names.tolist()])
-            if idx in df_lateral.index:
-                names = df_lateral.loc[idx].filename
-                if isinstance(names, str): self.uid2lateral[idx].append(os.path.join(self.image_dir, names))
-                else: self.uid2lateral[idx].extend([os.path.join(self.image_dir,name) for name in names.tolist()])
-
-        self.reports = reports.reset_index()
-        # check if one report does have both frontal and lateral image
-        f_uid_list = list(self.uid2frontal.keys())
-        l_uid_list = list(self.uid2lateral.keys())
-        x1 = [x for x in reports.index.tolist() if x not in f_uid_list]
-        x2 = [x for x in reports.index.tolist() if x not in l_uid_list]
-        print(np.intersect1d(x1, x2))
-
-    def compute_img_mean_std(self):
-        pixel_num  = 0
-        channel_sum = np.zeros(self.channel_num)
-        channel_sum_squared = np.zeros(self.channel_num)
-        for index in self.reports.index.tolist():
-            uid = self.reports.iloc[index].uid
-            print('compute image mean and std, uid: ', uid)
-            for filename in self.uid2frontal[uid]:
-                x_image = read_image(filename) # 1, 2048, 2496
-                img = x_image / 255
-                pixel_num += torch.prod(torch.tensor(img.shape)).item()
-                channel_sum += torch.sum(img).item()
-                channel_sum_squared += torch.sum(img.square()).item()
-
-            for filename in self.uid2lateral[uid]:
-                x_image = read_image(filename)
-                img = x_image / 255
-                pixel_num += torch.prod(torch.tensor(img.shape)).item()
-                channel_sum += torch.sum(img).item()
-                channel_sum_squared += torch.sum(img.square()).item()
-
-        img_mean = channel_sum / pixel_num
-        img_std = np.sqrt(channel_sum_squared/pixel_num - np.square(img_mean))
-        return {'mean':img_mean[0], 'std':img_std[0]}
-
-    def __len__(self):
-        return len(self.reports)
-
-    def __getitem__(self, idx):
-        '''return 
-        1. list of frontal images
-        2. list of lateral images
-        3. the report texts
-        4. the normal/abnormal label
-        '''
-        report = self.reports.iloc[idx]
-        uid = report.uid
-        report_str = ' '.join(report[self._report_sections_].fillna(' ').values.tolist())
-        f_list = []
-        for filename in self.uid2frontal[uid]:
-            x_image = Image.open(filename)
-            f_list.append(x_image)
-        l_list = []
-        for filename in self.uid2lateral[uid]:
-            x_image = Image.open(filename)
-            l_list.append(x_image)
-
-        if len(f_list) == 0 and len(l_list) == 0:
-            raise ValueError(f'no report found for this image from uid: {uid}, please check your dataset!')
-
-
-        return {'frontal': f_list, 'lateral': l_list, 'report': report_str, 'label': report['MeSH'], 'uid': uid}
-
-class IUXRaySentenceDataset(Dataset):
-    def __init__(self, datadir):
-        import json
-        self.datadir = datadir
-        self.file_path = os.path.join(datadir, 'sentence_dict.txt')
-        if not os.path.exists(self.file_path):
-            print('no sentence file found, start to process')
-            self._process()
-        with open(self.file_path, 'r') as f:
-            sent_dict = json.loads(f.read())
-        self.sent_ts = pd.Series(sent_dict)
-
-    def __len__(self):
-        return len(self.sent_ts)
-
-    def __getitem__(self, idx):
-        sent = self.sent_ts.index[idx]
-        return sent
-
-    def _process(self):
-        from tqdm import tqdm
-        import json
-        df = pd.read_csv(os.path.join(self.datadir,'indiana_reports.csv'))
-        df_reports = df[['findings','impression']]
-        df_reports.fillna('', inplace=True)
-        df_sentences = df_reports.applymap(lambda x: x.split('.'))
-        all_sent_dict = defaultdict(int)
-        for sample in tqdm(df_sentences.values):
-            for sent_list in sample:
-                for sent in sent_list:
-                    if len(sent)>0: all_sent_dict[sent.strip().lower()]+=1     
-        with open(self.file_path,'w') as f:
-            f.write(json.dumps(all_sent_dict))
-
-# ########
-# Three collators for three contrastive loss computation
-# ########
-class IUXRayCollatorBase:
-    def __init__(self,
-        feature_extractor=None,
-        tokenizer=None,
-        img_mean=None,
-        img_std=None,
-        max_text_length=77,
-        set_tokenizer=True,
-        set_feature_extractor=True,
-        ):
-        '''args:
-        set_tokenizer: set True if need tokenizer
-        set_feature_extractor: set True if need image feature extractor
-        '''
-        if feature_extractor is None and set_feature_extractor:
-            assert img_mean is not None
-            assert img_std is not None
-            self.feature_extractor = MedCLIPFeatureExtractor(
-                do_resize=True,
-                size=224,
-                resample=3,
-                do_center_crop=True,
-                crop_size=224,
-                do_normalize=True,
-                image_mean=img_mean,
-                image_std=img_std,
+        # could try contrast, brightness, fog
+        if imgtransform is None:
+            self.transform = transforms.Compose([
+                # transforms.RandomHorizontalFlip(0.5),
+                # transforms.ColorJitter(0.1,0.1),
+                transforms.ToTensor(),
+                transforms.Resize((constants.IMG_SIZE,constants.IMG_SIZE)),
+                transforms.Normalize(mean=[0.5862785803043838],std=[0.27950088968644304])],
             )
         else:
-            self.feature_extractor = feature_extractor
+            self.transform = imgtransform
 
-        if tokenizer is None and set_tokenizer:
-            self.tokenizer = CLIPTokenizer.from_pretrained('openai/clip-vit-base-patch32')
-        elif isinstance(tokenizer, str):
-            if os.path.exists(tokenizer):
-                self.tokenizer = CLIPTokenizer.from_pretrained(tokenizer)
-            else:
-                self.tokenizer = CLIPTokenizer.from_pretrained('openai/clip-vit-base-patch32')
-                self.tokenizer.save_pretrained(tokenizer)
+        # use labeled sentences as prompts for chexpert training
+        self.sentence_label = pd.read_csv('./local_data/sentence-label.csv', index_col=0).fillna(0)
+        print('load sentence prompts from ./local_data/sentence-label.csv')
+        self._preprocess_sentence_label()
+        self._build_prompt_sentence()
+
+    def __getitem__(self, index):
+        row = self.df.iloc[index]
+        img = Image.open(row.imgpath)
+        img = self._pad_img(img) # pad image to square
+        img = self.transform(img).unsqueeze(1)
+        report = row.report # original sentences list
+        img_label = row[self._labels_].values # image corresponds to text labels
+        if len(report) == 0: # no report available
+            # sample class prompts as augmentation
+            report, text_label = self.sample_sent_prompts(row)
         else:
-            self.tokenizer = tokenizer
-        
-        self.tokenizer.model_max_length = max_text_length
+            # randomly sample one sentence
+            sent_ix = random.randint(0, len(report)-1)
+            report = report[sent_ix]
+            # we need to use sentence-level label instead
+            # maintain a sentence dictionary
+            # index sentence dictionary label during training, if not found, return all zero
+            # **supervision from unpaired texts and images**
+            if report in self.sent_label_dict: # find the sentence
+                text_label = self.sent_label_dict[report]
+            else:
+                text_label = np.zeros(len(img_label))
+                text_label[0] = 1
+        return img, report, img_label, text_label
+            
+    def __len__(self):
+        return len(self.df)
     
-    def __call__(self, x):
-        raise NotImplementedError
-
-class IUXRayImageTextCollator(IUXRayCollatorBase):
-    def __init__(self, feature_extractor=None, tokenizer=None, img_mean=None, img_std=None, is_train=False):
-        '''return image-text report positive pairs
+    def _pad_img(self, img, min_size=224, fill_color=0):
+        '''pad img to square.
         '''
-        super().__init__(feature_extractor, tokenizer, img_mean, img_std)
-        self.is_train = is_train
-
-    def __call__(self, x):
-        '''
-        x: list of dict{frontal, lateral, report, label}
-        return {'input_ids': [], 'pixel_values': [], 'attention_mask':[], 'report':[], 'uid':[]}
-        '''
-        inputs = defaultdict(list)
-        text_list, uid_list = [], []
-        for data in x: # every data is a single patient
-            report = data['report']
-            uid = data['uid']
-            if self.is_train: report = self._text_random_cut_(report)
-            if len(data['frontal']) > 0:
-                images = self.feature_extractor(data['frontal'], return_tensors='pt')
-                inputs['pixel_values'].append(images['pixel_values'])
-                text_list.extend([report] * len(data['frontal']))
-                uid_list.extend([str(uid)] * len(data['frontal']))
-            if len(data['lateral']) > 0:
-                images = self.feature_extractor(data['lateral'], return_tensors='pt')
-                inputs['pixel_values'].append(images['pixel_values'])
-                text_list.extend([report] * len(data['lateral']))
-                uid_list.extend([str(uid)] * len(data['lateral']))
-
-        # tokenize texts together
-        text_token_ids = self.tokenizer(text_list, return_tensors='pt', padding=True, truncation=True)
-
-        for key in text_token_ids.keys():
-            inputs[key] = text_token_ids[key]
-        inputs['pixel_values'] = torch.cat(inputs['pixel_values'])
-        inputs['report'] = text_list
-        inputs['uid'] = uid_list
-        return inputs
-
-    def _text_random_cut_(self, text):
-        '''randomly cut the whole sentences into pieces
-        '''
-        sent_list = [sent.strip() for sent in text.split('.') if len(sent)>0]
-        return '. '.join(sent_list[:np.random.binomial(len(sent_list), 0.15)+1]) + '.'
-
-    def _text_sentence_cut_(self, text):
-        sent_list = [sent.strip() for sent in text.split('.') if len(sent)>0]
-        return np.random.choice(sent_list, 1)[0]
-
-class IUXRayAbnormalNormalCollator(IUXRayCollatorBase):
-    def __init__(self, feature_extractor=None, tokenizer=None, img_mean=None, img_std=None, is_train=False):
-        '''return abnormal-normal positive pairs,
-        normal: label 0
-        abnormal: label 1
-        '''
-        super().__init__(feature_extractor, tokenizer, img_mean, img_std)
-        self.is_train = is_train
-
-    def __call__(self, x):
-        '''
-        x: list of dict{frontal, lateral, report, label}
-        return {'pixel_values':[], 'labels':[]}
-        abnormals encodings will be saved in an momentum memory bank
-        '''
-        inputs = defaultdict(list)
-        text_list, uid_list = [], []
-        for data in x:
-            report = data['report']
-            uid = data['uid']
-            label = 0 if data['label']=='normal' else 1
-            num_images = len(data['frontal']) + len(data['lateral'])
-            if len(data['frontal']) > 0:
-                images = self.feature_extractor(data['frontal'], return_tensors='pt')
-                inputs['pixel_values'].append(images['pixel_values'])
-                text_list.extend([report] * len(data['frontal']))
-                uid_list.extend([str(uid)] * len(data['frontal']))
-
-            if len(data['lateral']) > 0:
-                images = self.feature_extractor(data['lateral'], return_tensors='pt')
-                inputs['pixel_values'].append(images['pixel_values'])
-                text_list.extend([report] * len(data['lateral']))
-                uid_list.extend([str(uid)] * len(data['lateral']))
-
-            inputs['labels'].extend([label]*num_images)
-        inputs['pixel_values'] = torch.cat(inputs['pixel_values'])
-        inputs['labels'] = torch.tensor(inputs['labels'])
-        inputs['report'] = text_list
-        inputs['uid'] = uid_list
-        return inputs
-
-class IUXRayFrontalLateralCollator(IUXRayCollatorBase):
-    def __init__(self, feature_extractor=None, tokenizer=None, img_mean=None, img_std=None, is_train=False):
-        '''return frontal-lateral positive pairs,
-        0: frontal
-        1: lateral
-        '''
-        super().__init__(feature_extractor, tokenizer, img_mean, img_std)
-        self.is_train = is_train
-
-    def __call__(self, x):
-        '''
-        x: list of dict{frontal, lateral, report, label}
-        return {'pixel_values':[], 'labels':[]}
-        labels==0: frontal
-        labels==1: lateral
-        '''
-        inputs = defaultdict(list)
-        text_list, uid_list = [], []
-
-        for data in x:
-            report = data['report']
-            uid = data['uid']
-            if len(data['frontal']) > 0:
-                images = self.feature_extractor(data['frontal'], return_tensors='pt')
-                inputs['pixel_values'].append(images['pixel_values'])
-                inputs['labels'].extend([0]*len(data['frontal']))
-                text_list.extend([report] * len(data['frontal']))
-                uid_list.extend([str(uid)] * len(data['frontal']))
-
-            if len(data['lateral']) > 0:
-                images = self.feature_extractor(data['lateral'], return_tensors='pt')
-                inputs['pixel_values'].append(images['pixel_values'])
-                inputs['labels'].extend([1]*len(data['lateral']))
-                text_list.extend([report] * len(data['lateral']))
-                uid_list.extend([str(uid)] * len(data['lateral']))
-
-        inputs['pixel_values'] = torch.cat(inputs['pixel_values'])
-        inputs['labels'] = torch.tensor(inputs['labels'])
-        inputs['uid'] = uid_list
-        inputs['report'] = text_list
-        return inputs
-
-class IUXRayTextCollator(IUXRayCollatorBase):
-    def __init__(self, tokenizer='./medclip/cliptokenizer'):
-        super().__init__(tokenizer=tokenizer, set_feature_extractor=False)
+        x, y = img.size
+        size = max(min_size, x, y)
+        new_im = Image.new('L', (size, size), fill_color)
+        new_im.paste(img, (int((size - x) / 2), int((size - y) / 2)))
+        return new_im
     
-    def __call__(self, x):
-        '''
-        x: list of sentences
-        '''
-        output = self.tokenizer(x, padding=True, truncation=True, return_tensors='pt')
-        output['sentence'] = x
-        return output
+    def sample_sent_prompts(self, row):
+        # do prompt sampling
+        if (row[self._labels_] == 0).all(): # no label available, use no finding
+            sampled_sent = self.sentence_label[self.sentence_label['No Finding'] > 0].sample()
+            report = sampled_sent['report'].values[0][0]
+            label = sampled_sent[self._labels_].values[0]
+        else:
+            # get prompt sentence x * 0 = 0, 1 * -1 = -1, 1 * 1 = 1, -1 * -1 = 1
+            bool_sent_label = self.prompt_sentence_label[self._labels_] *  row[self._labels_]
+            bool_sent_label[bool_sent_label < 0] = 0
+            sents = self.prompt_sentence_label.loc[~(bool_sent_label.iloc[:,1:] == 0).all(1)]
+            if len(sents) == 0: # only no finding
+                sampled_sent = self.prompt_sentence_label[self.prompt_sentence_label['No Finding']==1].sample()
+            else:
+                # random sample
+                sampled_sent = sents.sample()
+            report = sampled_sent['report'].values[0]
+            label = sampled_sent[self._labels_].values.flatten()
+        return report, label
 
-        
+    def create_sent_segments(self, df):
+        '''do preprocessing to split raw reports into sentence segments for
+        sentence-image contrastive pretraining.
+        '''
+        df['report'] = df['report'].apply(self._split_report_into_segment)
+        return df
+
+    def _split_report_into_segment(self, report):
+        '''clean up raw reports into sentences
+        '''
+        if pd.isnull(report):
+            return []
+        else:
+            report = report.replace('\n',' ')
+            splitter = re.compile("[0-9]+\.")
+            report = splitter.split(report)
+            reports = [point.split(".") for point in report]
+            reports = [sent for point in reports for sent in point]
+            study_sent = []
+            for sent in reports:
+                if len(sent) == 0:
+                    continue
+                
+                sent = sent.replace("\ufffd\ufffd", " ")
+                tokenizer = RegexpTokenizer(r"\w+")
+                tokens = tokenizer.tokenize(sent.lower())
+                if len(tokens) <= 1:
+                    continue
+
+                # filter tokens for current sentence
+                included_tokens = []
+                for t in tokens:
+                    t = t.encode("ascii", "ignore").decode("ascii")
+                    if len(t) > 0:
+                        included_tokens.append(t)
+                if len(included_tokens) > 4: # only include relative long sentences
+                    study_sent.append(" ".join(included_tokens))
+            return study_sent
+
+    def _preprocess_sentence_label(self):
+        self.sentence_label = self.sentence_label.drop_duplicates(subset='Reports')
+        self.sentence_label = self.sentence_label[self.sentence_label['Reports'].map(len)>2].reset_index(drop=True)
+        self.sentence_label['report'] = self.sentence_label['Reports']
+        self.sentence_label = self.sentence_label.drop('Reports', axis=1)
+        self.sentence_label = self.create_sent_segments(self.sentence_label)
+        self.sentence_label = self.sentence_label[(self.sentence_label['report'].map(len)==1)]
+        self.sentence_label['report'] = np.concatenate(self.sentence_label['report'].values)
+        # build dict from dataframe
+        keys = self.sentence_label['report'].values
+        vals = self.sentence_label.drop(['report'],axis=1).fillna(0).values
+        self.sent_label_dict = dict(zip(keys,vals))
+    
+    def _build_prompt_sentence(self, n = 200):
+        print('build prompt sentences.')
+        sentence_label = self.sentence_label.copy()
+        new_sent_list = []
+        for task in constants.CHEXPERT_TASKS:
+            sub_sent_df = sentence_label[sentence_label[task] == 1]
+            if len(sub_sent_df) < n: new_sent_list.append(sub_sent_df)
+            else: new_sent_list.append(sub_sent_df.sample(n))
+
+        new_sent_df = pd.concat(new_sent_list, 0)
+        new_sent_df = new_sent_df.drop_duplicates()
+        self.prompt_sentence_label = new_sent_df
+
+class ImageTextContrastiveCollator:
+    def __init__(self, use_eda=True):
+        '''Args:
+        use_EDA: easy data augmentation from textaugment
+        '''
+        if use_eda:
+            import nltk
+            nltk.download('stopwords')
+            nltk.download('omw-1.4')
+            from textaugment import EDA
+            self.eda = EDA()
+        else:
+            self.eda = None
+
+        self.tokenizer = AutoTokenizer.from_pretrained(constants.BERT_TYPE)
+        self.tokenizer.model_max_length = 77
+    def __call__(self, batch):
+        inputs = defaultdict(list)
+        report_list = []
+        report_aug_list = []
+        for data in batch:
+            inputs['pixel_values'].append(data[0])
+            if self.eda is not None:
+                eda_aug = random.choice([self.eda.synonym_replacement, self.eda.random_swap, self.eda.random_deletion])
+                text_aug = eda_aug(data[1])
+                if isinstance(text_aug, list): text_aug = ' '.join(text_aug)
+                report_aug_list.append(text_aug)
+            report_list.append(data[1])
+            inputs['img_labels'].append(data[2])
+            inputs['text_labels'].append(data[3])
+        text_inputs = self.tokenizer(report_list, truncation=True, padding=True, return_tensors='pt')
+        inputs['pixel_values'] = torch.cat(inputs['pixel_values'], 0)
+        if inputs['pixel_values'].shape[1] == 1: inputs['pixel_values'] = inputs['pixel_values'].repeat((1,3,1,1))
+        inputs['img_labels'] = torch.tensor(np.stack(inputs['img_labels']).astype(float))
+        inputs['text_labels'] = torch.tensor(np.stack(inputs['text_labels']).astype(float))
+        inputs['input_ids'] = text_inputs['input_ids']
+        inputs['attention_mask'] = text_inputs['attention_mask']
+        if len(report_aug_list) > 0:
+            aug_text_inputs = self.tokenizer(report_aug_list, truncation=True, padding=True, return_tensors='pt')
+            inputs['aug_input_ids'] =  aug_text_inputs['input_ids']
+            inputs['aug_attention_mask'] = aug_text_inputs['attention_mask']
+            
+        return inputs
+
+class ZeroShotImageDataset(Dataset):
+    def __init__(self, 
+        datalist=['chexpert-5x200'],
+        class_names=None,
+        imgtransform=None,
+        ) -> None:
+        '''support data list in iuxray, mimic-cxr, chexpert, chexpert-5x200;
+        args:
+            imgtransform: a torchvision transform
+            cls_prompts: a dict of prompt sentences, cls:[sent1, sent2, ..],
+        '''
+        super().__init__()
+
+        if imgtransform is None:
+            self.transform = transforms.Compose([
+                transforms.Resize((constants.IMG_SIZE,constants.IMG_SIZE)),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.5862785803043838],std=[0.27950088968644304])]
+            )
+        else:
+            self.transform = imgtransform
+
+        self.class_names = class_names
+
+        # imgpath, subject_id, report, labels...(14 labels)
+        df_list = []
+        for data in datalist:
+            filename = f'./local_data/{data}-meta.csv'
+            print('load data from', filename)
+            df = pd.read_csv(filename, index_col=0)
+            df_list.append(df)
+        self.df = pd.concat(df_list, axis=0).reset_index(drop=True)
+
+    def __getitem__(self, index):
+        row = self.df.iloc[index]
+        img = Image.open(row.imgpath)
+        img = self._pad_img(img)
+        img = self.transform(img).unsqueeze(1)
+        label = pd.DataFrame(row[self.class_names]).transpose()
+        return img, label
+
+    def _pad_img(self, img, min_size=224, fill_color=0):
+        '''pad img to square.
+        '''
+        x, y = img.size
+        size = max(min_size, x, y)
+        new_im = Image.new('L', (size, size), fill_color)
+        new_im.paste(img, (int((size - x) / 2), int((size - y) / 2)))
+        return new_im
+
+    def __len__(self):
+        return len(self.df)
+
+class ZeroShotImageCollator:
+    def __init__(self, mode, cls_prompts=None, n_prompt=5):
+        # initialize tokenizer
+        self.tokenizer = AutoTokenizer.from_pretrained(constants.BERT_TYPE)
+        self.tokenizer.model_max_length = 77
+        assert mode in ['multiclass','multilabel','binary']
+        self.mode = mode
+
+        if cls_prompts is None:
+            self.cls_prompts = generate_chexpert_class_prompts(n=n_prompt)
+        else:
+            self.cls_prompts = cls_prompts
+
+        # process cls prompts into texts indices
+        self.prompt_texts_inputs = process_class_prompts(self.cls_prompts)
+
+    def __call__(self, batch):
+        inputs = defaultdict(list)
+        for data in batch:
+            inputs['pixel_values'].append(data[0])
+            inputs['labels'].append(data[1])
+
+        inputs['labels'] = pd.concat(inputs['labels']).astype(int).values
+        if self.mode in ['multiclass','binary']:
+            inputs['labels'] = torch.tensor(inputs['labels'].argmax(1), dtype=int)
+        else:
+            inputs['labels'] = torch.tensor(inputs['labels'], dtype=float)
+
+        inputs['pixel_values'] = torch.cat(inputs['pixel_values'], 0)
+        if inputs['pixel_values'].shape[1] == 1: inputs['pixel_values'] = inputs['pixel_values'].repeat((1,3,1,1))
+        return {
+            'pixel_values': inputs['pixel_values'], 
+            'prompt_inputs': self.prompt_texts_inputs,
+            'labels': inputs['labels'],
+            }
+
+class SuperviseImageDataset(Dataset):
+    def __init__(self, 
+        datalist=['chexpert-5x200'],
+        class_names=None,
+        imgtransform=None, 
+        ) -> None:
+        '''support data list in iuxray, mimic-cxr, chexpert, chexpert, covid19;
+        args:
+            imgtransform: a torchvision transform
+            class_names: a list of class names
+        '''
+        super().__init__()
+        if imgtransform is None:
+            self.transform = transforms.Compose([
+                transforms.Resize((constants.IMG_SIZE,constants.IMG_SIZE)),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.5862785803043838],std=[0.27950088968644304])]
+            )
+        else:
+            self.transform = imgtransform
+
+        self.class_names = class_names
+
+        # imgpath, subject_id, report, labels...(14 labels)
+        df_list = []
+        for data in datalist:
+            filename = f'./local_data/{data}-meta.csv'
+            print('load data from', filename)
+            df = pd.read_csv(filename, index_col=0)
+            df_list.append(df)
+        self.df = pd.concat(df_list, axis=0).reset_index(drop=True)
+
+    def __getitem__(self, index):
+        row = self.df.iloc[index]
+        img = Image.open(row.imgpath)
+        img = self._pad_img(img)
+        img = self.transform(img).unsqueeze(1)
+        label = pd.DataFrame(row[self.class_names]).transpose()
+        return img, label
+
+    def _pad_img(self, img, min_size=224, fill_color=0):
+        '''pad img to square.
+        '''
+        x, y = img.size
+        size = max(min_size, x, y)
+        new_im = Image.new('L', (size, size), fill_color)
+        new_im.paste(img, (int((size - x) / 2), int((size - y) / 2)))
+        return new_im
+
+    def __len__(self):
+        return len(self.df)
+
+class SuperviseImageCollator:
+    def __init__(self, mode):
+        assert mode in ['multiclass','multilabel','binary']
+        self.mode = mode
+
+    def __call__(self, batch):
+        inputs = defaultdict(list)
+        for data in batch:
+            inputs['pixel_values'].append(data[0])
+            inputs['labels'].append(data[1])
+        inputs['labels'] = pd.concat(inputs['labels']).astype(int).values
+
+        if self.mode in ['multiclass','binary']:
+            inputs['labels'] = torch.tensor(inputs['labels'].argmax(1), dtype=int)
+        else:
+            inputs['labels'] = torch.tensor(inputs['labels'], dtype=float)
+
+        inputs['pixel_values'] = torch.cat(inputs['pixel_values'], 0)
+        if inputs['pixel_values'].shape[1] == 1: inputs['pixel_values'] = inputs['pixel_values'].repeat((1,3,1,1))
+        return {
+            'pixel_values': inputs['pixel_values'], 
+            'labels': inputs['labels'],
+            }
