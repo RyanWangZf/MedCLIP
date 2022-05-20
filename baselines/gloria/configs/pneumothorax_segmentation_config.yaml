@@ -1,0 +1,56 @@
+experiment_name: 'pneumothorax_segmentation'
+phase: 'segmentation'
+
+lightning:
+    trainer:
+       gpus: '0'
+       max_epochs: 100
+       lr: 5e-4
+       precision: 16
+       distributed_backend: 'dp'
+    checkpoint_callback:
+        monitor: 'val_dice'
+        dirpath: './data/ckpt'
+        save_last: true
+        mode: 'max'
+        save_top_k: 1
+    early_stopping_callback:
+        monitor: 'val_dice'
+        min_delta: 0.00
+        patience: 20
+        verbose: False
+        mode: 'max'
+    logger:
+        logger_type: 'WandbLogger'
+        save_dir: './data/'
+        project: 'GLoRIA'
+
+model:
+    vision:
+        model_name: 'gloria_resnet50'
+        freeze_cnn: false
+        pretrained: true
+        num_targets: 1
+
+data:
+    dataset: 'pneumothorax'
+    image:
+        imsize: 512
+
+transforms:
+    norm: 'half'
+
+train:
+    batch_size: 8
+    num_workers: 8
+    loss_fn:
+        type: MixedLoss
+        alpha: 10.0
+    optimizer:
+        name: 'Adam'
+        weight_decay: 1e-6
+    scheduler:
+        name: 'plateau'
+        monitor: 'val_loss'
+        interval: 'epoch'
+        frequency: 3

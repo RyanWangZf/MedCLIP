@@ -1,0 +1,58 @@
+experiment_name: 'pneumonia_classifier'
+phase: 'classification'
+
+lightning:
+    trainer:
+       gpus: '1'
+       max_epochs: 50
+       distributed_backend: 'dp'
+       lr: 5e-4
+       precision: 16
+       val_check_intervals: 0.05
+    checkpoint_callback:
+        monitor: 'val_loss'
+        dirpath: './data/ckpt'
+        save_last: true 
+        mode: min
+        save_top_k: 1
+    early_stopping_callback:
+        monitor: 'val_loss'
+        min_delta: 0.00
+        patience: 10
+        verbose: False
+        mode: 'min'
+    logger:
+        logger_type: 'WandbLogger'
+        save_dir: './data/'
+        project: 'GLoRIA'
+
+model: 
+    vision:
+        model_name: 'gloria_resnet50'
+        freeze_cnn: true
+        pretrained: false
+        num_targets: 1
+
+data: 
+    dataset: pneumonia
+    image:
+        imsize: 256
+    
+transforms: 
+    norm: 'half'
+    random_crop:
+        crop_size: 224
+
+train: 
+    batch_size: 64
+    num_workers: 16
+    loss_fn: 
+        type: BCE
+    optimizer: 
+        name: 'Adam'
+        weight_decay: 1e-6
+    scheduler: 
+        name: 'plateau'
+        monitor: 'val_loss'
+        interval: 'epoch'
+        frequency: 3
