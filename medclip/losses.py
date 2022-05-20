@@ -1,155 +1,128 @@
-import pdb
-
-import torch
 from torch import nn
+import torch.nn.functional as F
+import torch
+import pdb
+import numpy as np
 
 class ImageTextContrastiveLoss(nn.Module):
     def __init__(self, model):
         super().__init__()
         self.model = model
-    
-    # contrastive loss function, adapted from
-    # https://sachinruk.github.io/blog/pytorch/pytorch%20lightning/loss%20function/gpu/2021/03/07/CLIP.html
-    def contrastive_loss(self, logits: torch.Tensor) -> torch.Tensor:
-        return nn.functional.cross_entropy(logits, torch.arange(len(logits), device=logits.device))
-
-    def clip_loss(self, similarity: torch.Tensor) -> torch.Tensor:
-        caption_loss = self.contrastive_loss(similarity)
-        image_loss = self.contrastive_loss(similarity.T)
-        return (caption_loss + image_loss) / 2.0
-    
     def forward(self, 
         input_ids=None,
         pixel_values=None,
         attention_mask=None,
-        position_ids=None,
-        output_attentions=None,
-        output_hidden_states=None,
-        return_dict=None,
+        img_labels=None,
+        text_labels=None,
+        aug_input_ids=None,
+        aug_attention_mask=None,
         **kwargs,
         ):
-        '''return loss values
+        '''args:
+        labels: the image corresponds to which classes of diagnoses
+        text_labels: the text corresponds to which classes of diagnoses
         '''
-        # set train status
-        self.model.training = self.training
-
-        outputs = self.model(
-                input_ids=input_ids,
-                pixel_values=pixel_values,
-                attention_mask=attention_mask,
-                position_ids=position_ids,
-                return_loss=True,
-                output_attentions=output_attentions,
-                output_hidden_states=output_hidden_states,
-                return_dict=return_dict,
-                )
-        
-        return_res = {
-            'loss_value': outputs.loss,
-            'report': kwargs['report'],
-            'image_embedding': outputs.image_embeds,
-            'uid': kwargs['uid'],
-        }
-        return return_res
-
-class ImageImageContrastiveLoss(nn.Module):
-    '''compute contrastive loss using momentum memory banks between images and images,
-    MOCO-V3 like.
-    '''
-    def __init__(self, model, momentum_model, T=1):
-        '''
-        T: temperature for infonce loss
-        '''
-        super().__init__()
-        self.base_encoder = model
-        self.momentum_encoder = momentum_model
-        self.T = T
-        # build momentum encoder
-        for param_b, param_m in zip(self.base_encoder.parameters(), self.momentum_encoder.parameters()):
-            param_m.data.copy_(param_b.data)  # initialize
-            param_m.requires_grad = False  # not update by gradient
-            param_m.to(param_b.device)
-
-    @torch.no_grad()
-    def _update_momentum_encoder(self, m):
-        """Momentum update of the momentum encoder"""
-        for param_b, param_m in zip(self.base_encoder.parameters(), self.momentum_encoder.parameters()):
-            param_m.data = param_m.data * m + param_b.data * (1. - m)
-
-    def contrastive_loss(self, q, k):
-        # Einstein sum is more intuitive
-        logits = torch.einsum('nc,mc->nm', [q, k]) / self.T
-        N = logits.shape[0]  # batch size per GPU
-        labels = torch.arange(N, dtype=torch.long).cuda()
-        loss = nn.CrossEntropyLoss()(logits, labels) * (2 * self.T)
-        return loss
-
-    def forward(self,
-        input_ids=None,
-        pixel_values=None,
-        labels=None,
-        attention_mask=None,
-        position_ids=None,
-        return_loss=None,
-        output_attentions=None,
-        output_hidden_states=None,
-        return_dict=None,
-        **kwargs,
-    ):
-        '''
-        p_v = [img_1, img_2..]
-        labels= [0, 1, 0, 1,...]
-        * for normal/abnormal CL loss
-            x1: normal images, x2: abnormal images
-            q1: normal image feature, q2: abnormal image feature
-            k1: normal features using momentum encoder
-            k2: abnormal features using momentum encoder
-            CL loss is applied for:
-            negative pairs: {q1,k2}, {q2,k1}
-            positive pairs: {q1,k1}, {q2,k2}
-            to cl loss, it is {q1, k1, k2} and {q2, k2, k1}
-
-        * for frontal/lateral CL loss:
-            x1: frontal, x2: lateral
-            q1, q2: encode x1, x2
-            k1, k2: momentum encode x1, x2
-            same as MOCO where {q1,k2} positive, {q2,k1} positive on diagonal
-        '''
-        # set train status
-        # self.base_encoder = MedCLIP()
-        # self.base_encoder.encode_image(pixel_values)
-
-        self.base_encoder.training = self.training
-
-        feat_base = self.base_encoder.encode_image(pixel_values) # bs, 512
-        feat_momtm = self.momentum_encoder.encode_image(pixel_values) # bs, 512
-
-        if len(labels.unique()) == 1: # no abnormal images / normal images
-            # only do instance discriminative loss
-            loss = self.contrastive_loss(feat_base, feat_momtm)
+        if img_labels is None or text_labels is None:
+            '''use hard clip loss as the original clip
+            '''
+            outputs = self.model(
+                    input_ids=input_ids,
+                    pixel_values=pixel_values,
+                    attention_mask=attention_mask,
+                    return_loss=True,
+                    )
         else:
-            feat_base_nm = feat_base[labels==0]
-            feat_base_ab = feat_base[labels==1]
-            feat_momtm_nm = feat_momtm[labels==0]
-            feat_momtm_ab = feat_momtm[labels==1]
-
-            # q1,k1,k2
-            loss_nm = self.contrastive_loss(
-                feat_base_nm, 
-                torch.cat([feat_momtm_nm, feat_base_ab], axis=0)
-                )
-
-            # q2,k2,k1
-            loss_ab = self.contrastive_loss(
-                feat_base_ab, 
-                torch.cat([feat_momtm_ab, feat_base_nm], axis=0)
-                )
+            '''use soft clip loss
+            '''
+            outputs = self.model(
+                    input_ids=input_ids,
+                    pixel_values=pixel_values,
+                    attention_mask=attention_mask,
+                    return_loss=False,
+                    )
             
-            loss = loss_ab + loss_nm
-        
+            # get logits
+            logits = outputs['logits']    
+
+            # compute soft-labels, -1: negative, 0: uncertain, 1: positive
+            label_sim = torch.matmul(img_labels, text_labels.T)
+            label_sim = label_sim.to(logits.device)
+
+            if aug_input_ids is not None:
+                aug_text_embeds = self.model.encode_text(aug_input_ids, aug_attention_mask)
+                img_embeds = outputs['img_embeds']
+                logits_aug = self.model.compute_logits(img_embeds, aug_text_embeds)
+                aug_loss_value = self._soft_clip_loss(logits_aug, label_sim)
+                loss_value = self._soft_clip_loss(logits, label_sim)
+                outputs['loss_value'] = (aug_loss_value + loss_value) / 2
+            else:
+                outputs['loss_value'] = self._soft_clip_loss(logits, label_sim)
+
         return_res = {
-            'loss_value': loss,
-            'uid': kwargs['uid'],
-            'image_embedding': feat_base,
+            'loss_value': outputs['loss_value'],
         }
         return return_res
+    
+    def _soft_clip_loss(self, logits_per_img, soft_label):
+        '''take labels of images and sentences as a softlabel
+        e.g., image_label = [1, 0, 1, -1], sentence_label = [0, 0, 1, -1]
+        this pair has similarity as: 1 * 0 + 0 * 0 + 1 * 1 + -1 * -1 = 2.
+        We will clamp the similarity into [-1,1], and take softmax as a soft-label.
+        '''
+        # when using InfoNCE-like loss
+        image_loss = self._soft_xent_loss(logits_per_img, F.softmax(soft_label,1))
+        caption_loss = self._soft_xent_loss(logits_per_img.T, F.softmax(soft_label.T,1))
+        return (image_loss + caption_loss) / 2
+
+        # when using multilabel bce loss
+        # image_loss = self._soft_bce_loss(logits_per_img, soft_label)
+        # return image_loss
+
+    def _soft_xent_loss(self, input, target):
+        logprobs = torch.nn.functional.log_softmax(input, dim = 1)
+        return  -(target * logprobs).sum() / input.shape[0]
+    
+    def _soft_bce_loss(self, input, target):
+        return nn.functional.binary_cross_entropy_with_logits(input, target)
+
+
+class ImageSuperviseLoss(nn.Module):
+    def __init__(self, 
+        model, 
+        loss_fn=None,
+        ):
+        super().__init__()
+        self.model = model
+        self.mode = model.mode
+        if loss_fn is None:
+            if self.mode in ['multilabel','binary']:
+                self.loss_fn = nn.BCEWithLogitsLoss()
+            else:
+                self.loss_fn = nn.CrossEntropyLoss()
+        else:
+            self.loss_fn = loss_fn
+    
+    def forward(self, 
+        pixel_values, 
+        labels=None,
+        **kwargs):
+        outputs = self.model(pixel_values=pixel_values, labels=labels, return_loss=True)
+        # mix_x, y_a, y_b, lamb = self.mixup_data(pixel_values, labels)
+        # outputs = self.model(pixel_values=mix_x, labels=labels, return_loss=False)
+        # y_a = y_a.cuda()
+        # y_b = y_b.cuda()
+        # loss = self.mixup_criterion(self.loss_fn, outputs['logits'], y_a, y_b, lamb)
+        # outputs['loss_value'] = loss
+        return outputs
+    
+    def mixup_data(self, x, y, alpha=0.3):
+        if alpha > 0: lamb = np.random.beta(alpha, alpha)
+        else: lamb = 1
+        batch_size = x.shape[0]
+        index = torch.randperm(batch_size).to(x.device)
+        mixed_x = lamb * x + (1 - lamb) * x[index, :]
+        y_a, y_b = y, y[index]
+        return mixed_x, y_a, y_b, lamb
+    
+    def mixup_criterion(self, criterion, pred, y_a, y_b, lamb):
+        return lamb * criterion(pred, y_a) + (1- lamb) * criterion(pred, y_b)
