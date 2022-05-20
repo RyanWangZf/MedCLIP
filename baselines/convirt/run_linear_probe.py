@@ -159,7 +159,7 @@ train_config = {
 
 vision_model  = models.resnet50()
 new_state_dict = {}
-state_dict = torch.load(f'./checkpoints/convirt_pretrain/37000/{constants.WEIGHTS_NAME}')
+state_dict = torch.load(f'./pretrained/{constants.WEIGHTS_NAME}')
 for key in state_dict.keys():
     if 'image_model' in key and 'fc' not in key:
         new_state_dict[key.replace('image_model.','')] = state_dict[key]

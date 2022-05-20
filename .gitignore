@@ -140,5 +140,7 @@ local_data
 checkpoint
 ckpt
 checkpoints
+*.ckpt
+*.bin
 
 
