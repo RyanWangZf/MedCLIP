@@ -1,6 +1,7 @@
 .idea/
 ReportGenerationMeetsGraph/data/NLMCXR_pngs
 ReportGenerationMeetsGraph/output/
+.DS_Store
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
