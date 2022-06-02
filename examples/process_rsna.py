@@ -20,12 +20,12 @@ if not os.path.exists(tgt_dir):
 dst_dir = os.path.join(src_dir, 'images')
 if not os.path.exists(dst_dir):
     os.makedirs(dst_dir)
-src_dir = os.path.join(src_dir, 'stage_2_train_images/')
+src_img_dir = os.path.join(src_dir, 'stage_2_train_images/')
 meta_df = defaultdict(list)
 
-src_files = os.listdir(src_dir)
+src_files = os.listdir(src_img_dir)
 for filename in tqdm(src_files):
-    src_path = os.path.join(src_dir, filename)
+    src_path = os.path.join(src_img_dir, filename)
     x = pydicom.read_file(src_path)
     pixels = x.pixel_array
     view_position = x.ViewPosition
@@ -50,3 +50,9 @@ normal = np.zeros(len(df_merge))
 normal[df_merge['Target']==0] = 1
 df_merge['Normal'] = normal
 df_merge.drop(['Target'], axis=1).to_csv(os.path.join(tgt_dir, './rsna-meta.csv'))
+
+df_meta = pd.read_csv(os.path.join(tgt_dir, './rsna-meta.csv'), index_col=0)
+df_train = df_meta.sample(frac=0.7)
+df_test = df_meta[~df_meta['imgpath'].isin(df_train['imgpath'])]
+df_train.to_csv(os.path.join(tgt_dir,'rsna-train-meta.csv'))
+df_test.to_csv(os.path.join(tgt_dir,'rsna-test-meta.csv'))
