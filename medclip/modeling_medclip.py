@@ -6,13 +6,14 @@ import torch
 from torch import nn
 from transformers import AutoModel, AutoTokenizer
 import numpy as np
+import torchvision
 
 
-from .vision_model import Uwinformer
+
 from . import constants
 
 class MedClipTextModel(nn.Module):
-    def __init__(self, 
+    def __init__(self,
         bert_type=constants.BERT_TYPE,
         proj_dim = 512) -> None:
         super().__init__()
@@ -21,7 +22,7 @@ class MedClipTextModel(nn.Module):
         self.model = AutoModel.from_pretrained(self.bert_type, output_hidden_states=True)
         self.tokenizer = AutoTokenizer.from_pretrained(self.bert_type)
         self.projection_head = nn.Linear(768, proj_dim)
-    
+
     def forward(self, input_ids, attention_mask):
         output = self.model(input_ids=input_ids, attention_mask=attention_mask)
         # take the average of last four layers
@@ -35,6 +36,45 @@ class MedClipTextModel(nn.Module):
         return embed
 
 class MedClipVisionModel(nn.Module):
+    '''
+    take resnet50 as backbone.
+    '''
+    def __init__(self, checkpoint=None, medclip_checkpoint=None):
+        super().__init__()
+        self.model = torchvision.models.resnet50(pretrained=True)
+        num_fts = self.model.fc.in_features
+        self.model.fc = nn.Linear(num_fts, 512, bias=False) # projection head
+        if checkpoint is not None:
+            state_dict = torch.load(os.path.join(checkpoint, constants.WEIGHTS_NAME))
+            missing_keys, unexpected_keys = self.load_state_dict(state_dict, strict=False)
+            print('missing keys:', missing_keys)
+            print('unexpected keys:', unexpected_keys)
+            print('load model weight from:', checkpoint)
+        if medclip_checkpoint is not None:
+            self.load_from_medclip(medclip_checkpoint)
+
+    def load_from_medclip(self, checkpoint):
+        '''handle key mismatch of medclip and the vision encoder.
+        '''
+        state_dict = torch.load(os.path.join(checkpoint, constants.WEIGHTS_NAME))
+        new_state_dict = {}
+        for key in state_dict.keys():
+            if 'vision_model' in key:
+                new_state_dict[key.replace('vision_model.','')] = state_dict[key]
+        missing_keys, unexpected_keys = self.load_state_dict(new_state_dict, strict=False)
+        print('missing keys:', missing_keys)
+        print('unexpected keys:', unexpected_keys)
+        print('load model weight from:', checkpoint)
+
+    def forward(self, pixel_values):
+        '''args:
+        pixel_values: tensor with shape [bs, 3, img_size, img_size]
+        '''
+        if pixel_values.shape[1] == 1: pixel_values = pixel_values.repeat((1,3,1,1))
+        img_embeds = self.model(pixel_values)
+        return img_embeds
+
+class MedClipVisionModelViT(nn.Module):
     '''take an VIT model as the backbone.
     '''
     def __init__(self, checkpoint=None, medclip_checkpoint=None) -> None:
@@ -54,7 +94,7 @@ class MedClipVisionModel(nn.Module):
             print('load model weight from:', checkpoint)
         if medclip_checkpoint is not None:
             self.load_from_medclip(medclip_checkpoint)
-    
+
     def load_from_medclip(self, checkpoint):
         '''handle key mismatch of medclip and the vision encoder.
         '''
@@ -89,7 +129,7 @@ class MedClipModel(nn.Module):
         self.vision_model = MedClipVisionModel(checkpoint=vision_checkpoint)
         self.text_model = MedClipTextModel()
 
-        # learnable temperature for contrastive loss        
+        # learnable temperature for contrastive loss
         self.logit_scale = nn.Parameter(torch.log(torch.tensor(1/logit_scale_init_value)))
 
         if checkpoint is not None:
@@ -104,14 +144,14 @@ class MedClipModel(nn.Module):
         text_embeds = self.text_model(input_ids, attention_mask)
         text_embeds = text_embeds / text_embeds.norm(dim=-1, keepdim=True)
         return text_embeds
-    
+
     def encode_image(self, pixel_values=None):
         # image encoder
         vision_output = self.vision_model(pixel_values=pixel_values)
         img_embeds = vision_output / vision_output.norm(dim=-1, keepdim=True)
         return img_embeds
 
-    def forward(self, 
+    def forward(self,
         input_ids=None,
         pixel_values=None,
         attention_mask=None,
@@ -133,7 +173,7 @@ class MedClipModel(nn.Module):
             loss = self.clip_loss(logits_per_text)
         else:
             loss = None
-        
+
         return {'img_embeds':img_embeds, 'text_embeds':text_embeds,
             'logits':logits_per_image, 'loss_value':loss, 'logits_per_text':logits_per_text}
 
@@ -160,7 +200,7 @@ class MedClipPromptClassifier(nn.Module):
         self.ensemble = ensemble
 
     def forward(self, pixel_values=None, prompt_inputs=None, **kwargs):
-        '''take image pixel values (after transform) and prompt_inputs 
+        '''take image pixel values (after transform) and prompt_inputs
         (a dict of {'class1':{'input_ids':...,'attention_mask':,...}), 'class2':...}
         '''
         pixel_values = pixel_values.cuda()
@@ -170,7 +210,7 @@ class MedClipPromptClassifier(nn.Module):
             inputs = {'pixel_values':pixel_values}
             for k in cls_text.keys(): inputs[k] = cls_text[k].cuda()
 
-            # TODO: 
+            # TODO:
             # take soft mask over class_prompts to reach the similarities to classes
             medclip_outputs = self.model(**inputs)
             logits = medclip_outputs['logits']
@@ -188,14 +228,14 @@ class MedClipPromptClassifier(nn.Module):
         outputs = {
             'logits': class_similarities,
             'class_names': class_names,
-        }        
+        }
         return outputs
 
 class MedClipClassifier(nn.Module):
     '''take MedCLIP model with linear heads for supervised classification on images.
     '''
-    def __init__(self, 
-        vision_model, 
+    def __init__(self,
+        vision_model,
         num_class=14,
         input_dim=768,
         mode=None,
@@ -220,10 +260,10 @@ class MedClipClassifier(nn.Module):
             self.fc = nn.Linear(input_dim, num_class)
         else:
             self.loss_fn = nn.BCEWithLogitsLoss()
-            self.fc = nn.Linear(input_dim, 1)        
-    
-    def forward(self, 
-        pixel_values, 
+            self.fc = nn.Linear(input_dim, 1)
+
+    def forward(self,
+        pixel_values,
         labels=None,
         return_loss=True,
         **kwargs,
@@ -242,6 +282,3 @@ class MedClipClassifier(nn.Module):
             loss = self.loss_fn(logits, labels)
             outputs['loss_value'] = loss
         return outputs
-    
-
-
