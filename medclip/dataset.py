@@ -37,7 +37,7 @@ class ImageTextContrastiveDataset(Dataset):
             df = pd.read_csv(filename, index_col=0)
             df_list.append(df)
         self.df = pd.concat(df_list, axis=0).reset_index(drop=True)
-        
+
         # split raw reports and process into sentences
         self.df = self.create_sent_segments(self.df)
 
@@ -83,10 +83,10 @@ class ImageTextContrastiveDataset(Dataset):
                 text_label = np.zeros(len(img_label))
                 text_label[0] = 1
         return img, report, img_label, text_label
-            
+
     def __len__(self):
         return len(self.df)
-    
+
     def _pad_img(self, img, min_size=224, fill_color=0):
         '''pad img to square.
         '''
@@ -95,7 +95,7 @@ class ImageTextContrastiveDataset(Dataset):
         new_im = Image.new('L', (size, size), fill_color)
         new_im.paste(img, (int((size - x) / 2), int((size - y) / 2)))
         return new_im
-    
+
     def sample_sent_prompts(self, row):
         # do prompt sampling
         if (row[self._labels_] == 0).all(): # no label available, use no finding
@@ -138,7 +138,7 @@ class ImageTextContrastiveDataset(Dataset):
             for sent in reports:
                 if len(sent) == 0:
                     continue
-                
+
                 sent = sent.replace("\ufffd\ufffd", " ")
                 tokenizer = RegexpTokenizer(r"\w+")
                 tokens = tokenizer.tokenize(sent.lower())
@@ -167,7 +167,7 @@ class ImageTextContrastiveDataset(Dataset):
         keys = self.sentence_label['report'].values
         vals = self.sentence_label.drop(['report'],axis=1).fillna(0).values
         self.sent_label_dict = dict(zip(keys,vals))
-    
+
     def _build_prompt_sentence(self, n = 200):
         print('build prompt sentences.')
         sentence_label = self.sentence_label.copy()
@@ -190,6 +190,7 @@ class ImageTextContrastiveCollator:
             import nltk
             nltk.download('stopwords')
             nltk.download('omw-1.4')
+            nltk.download('wordnet')
             from textaugment import EDA
             self.eda = EDA()
         else:
@@ -222,11 +223,11 @@ class ImageTextContrastiveCollator:
             aug_text_inputs = self.tokenizer(report_aug_list, truncation=True, padding=True, return_tensors='pt')
             inputs['aug_input_ids'] =  aug_text_inputs['input_ids']
             inputs['aug_attention_mask'] = aug_text_inputs['attention_mask']
-            
+
         return inputs
 
 class ZeroShotImageDataset(Dataset):
-    def __init__(self, 
+    def __init__(self,
         datalist=['chexpert-5x200'],
         class_names=None,
         imgtransform=None,
@@ -309,16 +310,16 @@ class ZeroShotImageCollator:
         inputs['pixel_values'] = torch.cat(inputs['pixel_values'], 0)
         if inputs['pixel_values'].shape[1] == 1: inputs['pixel_values'] = inputs['pixel_values'].repeat((1,3,1,1))
         return {
-            'pixel_values': inputs['pixel_values'], 
+            'pixel_values': inputs['pixel_values'],
             'prompt_inputs': self.prompt_texts_inputs,
             'labels': inputs['labels'],
             }
 
 class SuperviseImageDataset(Dataset):
-    def __init__(self, 
+    def __init__(self,
         datalist=['chexpert-5x200'],
         class_names=None,
-        imgtransform=None, 
+        imgtransform=None,
         ) -> None:
         '''support data list in iuxray, mimic-cxr, chexpert, chexpert, covid19;
         args:
@@ -386,6 +387,6 @@ class SuperviseImageCollator:
         inputs['pixel_values'] = torch.cat(inputs['pixel_values'], 0)
         if inputs['pixel_values'].shape[1] == 1: inputs['pixel_values'] = inputs['pixel_values'].repeat((1,3,1,1))
         return {
-            'pixel_values': inputs['pixel_values'], 
+            'pixel_values': inputs['pixel_values'],
             'labels': inputs['labels'],
             }

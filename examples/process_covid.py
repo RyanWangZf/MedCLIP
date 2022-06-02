@@ -6,7 +6,9 @@ import numpy as np
 import random
 from tqdm import tqdm
 from PIL import Image
-
+import sys
+sys.path.insert(0, os.path.abspath(os.path.dirname("__file__")))
+print(sys.path)
 np.random.seed(42)
 random.seed(42)
 

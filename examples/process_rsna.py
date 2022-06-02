@@ -10,6 +10,9 @@ from PIL import Image
 
 np.random.seed(42)
 random.seed(42)
+import sys
+sys.path.insert(0, os.path.abspath(os.path.dirname("__file__")))
+print(sys.path)
 
 src_dir = './data/RSNA'
 tgt_dir = './local_data'

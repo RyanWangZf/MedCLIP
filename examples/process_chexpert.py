@@ -4,19 +4,25 @@ import os
 import pandas as pd
 import numpy as np
 import random
+import sys
+
+# support run as `python examples/process_chexpert.py`
+sys.path.insert(0, os.path.abspath(os.path.dirname("__file__")))
+print(sys.path)
 
 np.random.seed(42)
 random.seed(42)
 
-src_dir = './data/CheXpert/CheXpert-v1.0-small/'
+src_dir = './data/CheXpert/'
 tgt_dir = './local_data'
 
 if not os.path.exists(tgt_dir):
     os.makedirs(tgt_dir)
-meta_path = os.path.join(src_dir, 'train.csv')
+meta_path = os.path.join(src_dir, './CheXpert-v1.0-small/train.csv')
 df = pd.read_csv(meta_path)
 df['subject_id'] = df['Path'].apply(lambda x: '-'.join(x.split('/')[2:4]))
 df = df.rename(columns = {'Path':'imgpath'})
+df['imgpath'] = df['imgpath'].apply(lambda x: os.path.join(src_dir,x))
 df = df.fillna(0)
 df = df.replace({-1:0})
 

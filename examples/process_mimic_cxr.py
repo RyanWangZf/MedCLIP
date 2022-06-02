@@ -6,6 +6,11 @@ import random
 
 from medclip import constants
 
+import sys
+sys.path.insert(0, os.path.abspath(os.path.dirname("__file__")))
+print(sys.path)
+
+
 np.random.seed(42)
 random.seed(42)
 
