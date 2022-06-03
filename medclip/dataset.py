@@ -190,6 +190,7 @@ class ImageTextContrastiveCollator:
             import nltk
             nltk.download('stopwords')
             nltk.download('omw-1.4')
+            nltk.download('wordnet')
             from textaugment import EDA
             self.eda = EDA()
         else:

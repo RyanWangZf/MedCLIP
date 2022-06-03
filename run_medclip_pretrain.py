@@ -43,7 +43,7 @@ train_config = {
 # do zero-shot training on chexpert-5x200 and iuxray
 datalist = [
     'chexpert-train',
-    'mimic-cxr',
+    'mimic-cxr-train',
 ]
 
 transform = transforms.Compose([
