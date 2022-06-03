@@ -7,6 +7,7 @@ from torch import nn
 from transformers import AutoModel, AutoTokenizer
 import numpy as np
 
+import copy
 
 from .vision_model import Uwinformer
 from . import constants
@@ -19,6 +20,7 @@ class MedClipTextModel(nn.Module):
         self.bert_type = bert_type
         self.last_n_layer = 4
         self.model = AutoModel.from_pretrained(self.bert_type, output_hidden_states=True)
+        # this tokenizer is actually not used
         self.tokenizer = AutoTokenizer.from_pretrained(self.bert_type)
         self.projection_head = nn.Linear(768, proj_dim)
     
@@ -245,3 +247,48 @@ class MedClipClassifier(nn.Module):
     
 
 
+class MedClipPromptTuningClassifier(nn.Module):
+    '''take MedCLIP model with prompt tuning
+    '''
+    def __init__(self, medclip_model, n_new_token, ensemble=True, **kwargs) -> None:
+        super().__init__()
+        self.model = medclip_model
+        self.ensemble = ensemble
+        self.n_new_token = n_new_token
+        prev_num_embeddings = self.model.text_model.model.embeddings.word_embeddings.num_embeddings
+        self.prev_embeddings = copy.deepcopy(self.model.text_model.model.embeddings.word_embeddings.weight.data)
+        self.model.text_model.model.resize_token_embeddings(prev_num_embeddings + n_new_token)
+        self.loss_fn = nn.CrossEntropyLoss()
+        return
+
+    def forward(self, pixel_values=None, prompt_inputs=None, labels=None, **kwargs):
+        '''take image pixel values (after transform) and prompt_inputs
+        (a dict of {'class1':{'input_ids':...,'attention_mask':,...}), 'class2':...}
+        '''
+        pixel_values = pixel_values.cuda()
+        class_similarities = []
+        class_names = []
+        for cls_name, cls_text in prompt_inputs.items():
+            inputs = {'pixel_values':pixel_values}
+            for k in cls_text.keys(): inputs[k] = cls_text[k].cuda()
+
+            # TODO:
+            # take soft mask over class_prompts to reach the similarities to classes
+            medclip_outputs = self.model(**inputs)
+            logits = medclip_outputs['logits']
+
+            # take logits max as the class similarity
+            # cls_sim = torch.max(logits, 1)[0] # equivalent use only one prompt
+            if self.ensemble:
+                cls_sim = torch.mean(logits, 1) # equivalent to prompt ensembling
+            else:
+                cls_sim = torch.max(logits, 1)[0]
+            class_similarities.append(cls_sim)
+            class_names.append(cls_name)
+
+        class_similarities = torch.stack(class_similarities, 1)
+        outputs = {
+            'logits': class_similarities,
+            'class_names': class_names,
+        }
+        return outputs

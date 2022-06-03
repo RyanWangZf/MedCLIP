@@ -95,3 +95,28 @@ def process_class_prompts(cls_prompts):
         cls_prompt_inputs[k] = text_inputs
     return cls_prompt_inputs
 
+
+def process_class_prompts_for_tuning(cls_prompts, n_context, class_specific_context):
+    tokenizer = AutoTokenizer.from_pretrained(constants.BERT_TYPE)
+    tokenizer.model_max_length = 77
+
+    if class_specific_context:
+        context = [f'<prompt_{k}_{i}>' for i in range(n_context) for k in cls_prompts]
+        num_added_tokens = tokenizer.add_tokens(context)
+        assert num_added_tokens == n_context * len(cls_prompts)
+    else:
+        context = [f'<prompt_{i}>' for i in range(n_context)]
+        num_added_tokens = tokenizer.add_tokens(context)
+        assert num_added_tokens == n_context
+
+    cls_prompt_inputs = defaultdict()
+    for k, v in cls_prompts.items():
+        if class_specific_context:
+            prefix = ' '.join([f'<prompt_{k}_{i}>' for i in range(n_context)])
+        else:
+            prefix = ' '.join([f'<prompt_{i}>' for i in range(n_context)])
+        context_v = [f'{prefix} {i}' for i in v]
+        text_inputs = tokenizer(context_v, truncation=True, padding=True, return_tensors='pt')
+        cls_prompt_inputs[k] = text_inputs
+    return cls_prompt_inputs
+
