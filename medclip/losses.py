@@ -8,7 +8,7 @@ class ImageTextContrastiveLoss(nn.Module):
     def __init__(self, model):
         super().__init__()
         self.model = model
-    def forward(self, 
+    def forward(self,
         input_ids=None,
         pixel_values=None,
         attention_mask=None,
@@ -40,9 +40,9 @@ class ImageTextContrastiveLoss(nn.Module):
                     attention_mask=attention_mask,
                     return_loss=False,
                     )
-            
+
             # get logits
-            logits = outputs['logits']    
+            logits = outputs['logits']
 
             # compute soft-labels, -1: negative, 0: uncertain, 1: positive
             label_sim = torch.matmul(img_labels, text_labels.T)
@@ -62,7 +62,7 @@ class ImageTextContrastiveLoss(nn.Module):
             'loss_value': outputs['loss_value'],
         }
         return return_res
-    
+
     def _soft_clip_loss(self, logits_per_img, soft_label):
         '''take labels of images and sentences as a softlabel
         e.g., image_label = [1, 0, 1, -1], sentence_label = [0, 0, 1, -1]
@@ -81,14 +81,14 @@ class ImageTextContrastiveLoss(nn.Module):
     def _soft_xent_loss(self, input, target):
         logprobs = torch.nn.functional.log_softmax(input, dim = 1)
         return  -(target * logprobs).sum() / input.shape[0]
-    
+
     def _soft_bce_loss(self, input, target):
         return nn.functional.binary_cross_entropy_with_logits(input, target)
 
 
 class ImageSuperviseLoss(nn.Module):
-    def __init__(self, 
-        model, 
+    def __init__(self,
+        model,
         loss_fn=None,
         ):
         super().__init__()
@@ -101,9 +101,9 @@ class ImageSuperviseLoss(nn.Module):
                 self.loss_fn = nn.CrossEntropyLoss()
         else:
             self.loss_fn = loss_fn
-    
-    def forward(self, 
-        pixel_values, 
+
+    def forward(self,
+        pixel_values,
         labels=None,
         **kwargs):
         outputs = self.model(pixel_values=pixel_values, labels=labels, return_loss=True)
@@ -114,7 +114,7 @@ class ImageSuperviseLoss(nn.Module):
         # loss = self.mixup_criterion(self.loss_fn, outputs['logits'], y_a, y_b, lamb)
         # outputs['loss_value'] = loss
         return outputs
-    
+
     def mixup_data(self, x, y, alpha=0.3):
         if alpha > 0: lamb = np.random.beta(alpha, alpha)
         else: lamb = 1
@@ -123,6 +123,6 @@ class ImageSuperviseLoss(nn.Module):
         mixed_x = lamb * x + (1 - lamb) * x[index, :]
         y_a, y_b = y, y[index]
         return mixed_x, y_a, y_b, lamb
-    
+
     def mixup_criterion(self, criterion, pred, y_a, y_b, lamb):
         return lamb * criterion(pred, y_a) + (1- lamb) * criterion(pred, y_b)

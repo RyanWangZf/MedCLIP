@@ -55,9 +55,9 @@ class ImageTextContrastiveDataset(Dataset):
                 transforms.ToTensor(),
                 transforms.Normalize(mean=[0.5862785803043838],std=[0.27950088968644304])]
             )
-        else: 
+        else:
             self.transform = imgtransform
-        
+
     def __getitem__(self, index):
         row = self.df.iloc[index]
         img = Image.open(row.imgpath)
@@ -93,7 +93,7 @@ class ImageTextContrastiveDataset(Dataset):
             for sent in reports:
                 if len(sent) == 0:
                     continue
-                
+
                 sent = sent.replace("\ufffd\ufffd", " ")
                 tokenizer = RegexpTokenizer(r"\w+")
                 tokens = tokenizer.tokenize(sent.lower())
@@ -133,7 +133,7 @@ class ConVIRT(nn.Module):
         self.image_model = models.resnet50(pretrained=True)
         num_fts = self.image_model.fc.in_features
         self.image_model.fc = nn.Linear(num_fts, 512) # projection head
-        
+
         self.text_model = AutoModel.from_pretrained("emilyalsentzer/Bio_ClinicalBERT")
         self.text_projection_head = nn.Linear(768, 512)
 
@@ -171,7 +171,7 @@ class ConVIRT(nn.Module):
             # compute infonce loss
             outputs['loss_value'] = self.compute_loss(logits)
         return outputs
-        
+
     def compute_loss(self, logits):
         loss_fn = nn.CrossEntropyLoss()
         image_loss = loss_fn(logits, torch.arange(len(logits), device=logits.device))
@@ -183,7 +183,7 @@ class ConVIRTClassifier(nn.Module):
     def __init__(self, model):
         super().__init__()
         self.model = model
-    
+
     def forward(self, pixel_values=None, prompt_inputs=None, **kwargs):
         pixel_values = pixel_values.cuda()
         class_similarities = []
@@ -200,7 +200,7 @@ class ConVIRTClassifier(nn.Module):
             # cls_sim = torch.max(logits, 1)
             class_similarities.append(cls_sim)
             class_names.append(cls_name)
-        
+
         class_similarities = torch.stack(class_similarities, 1)
         outputs = {
             'logits': class_similarities,
@@ -227,9 +227,9 @@ datalist = [
 ]
 traindata = ImageTextContrastiveDataset(datalist=datalist)
 train_collate_fn = ImageTextContrastiveCollator()
-trainloader = DataLoader(traindata, 
-    batch_size=train_config['batch_size'], 
-    collate_fn=train_collate_fn, 
+trainloader = DataLoader(traindata,
+    batch_size=train_config['batch_size'],
+    collate_fn=train_collate_fn,
     shuffle=True,
     pin_memory=True,
     num_workers=12,

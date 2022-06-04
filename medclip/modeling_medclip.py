@@ -21,7 +21,7 @@ class MedClipTextModel(nn.Module):
         self.last_n_layer = 4
         self.model = AutoModel.from_pretrained(self.bert_type, output_hidden_states=True)
         self.tokenizer = AutoTokenizer.from_pretrained(self.bert_type)
-        self.projection_head = nn.Linear(768, proj_dim)
+        self.projection_head = nn.Linear(768, proj_dim, bias=False)
 
     def forward(self, input_ids, attention_mask):
         output = self.model(input_ids=input_ids, attention_mask=attention_mask)
@@ -194,7 +194,7 @@ class MedClipModel(nn.Module):
 class MedClipPromptClassifier(nn.Module):
     '''take MedCLIP model with prompts for zero-shot classification
     '''
-    def __init__(self, medclip_model, ensemble=True, **kwargs) -> None:
+    def __init__(self, medclip_model, ensemble=False, **kwargs) -> None:
         super().__init__()
         self.model = medclip_model
         self.ensemble = ensemble

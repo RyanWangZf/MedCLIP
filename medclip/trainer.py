@@ -58,7 +58,7 @@ class Trainer:
         if use_amp:
             from torch.cuda.amp import autocast
             scaler = torch.cuda.amp.GradScaler()
-        
+
         self.score_logs = defaultdict(list)
         self.evaluator = evaluator
         self.eval_dataloader = eval_dataloader
@@ -179,7 +179,7 @@ class Trainer:
                     for key in scores.keys():
                         if key in ['acc','auc']:
                             self.score_logs[key].append(scores[key])
-                
+
                 if self.evaluator is None and global_step % save_steps == 0:
                     state_dict = model.state_dict()
                     save_dir =  os.path.join(output_path, f'{global_step}/')
@@ -203,9 +203,8 @@ class Trainer:
             state_dict = model.state_dict()
             torch.save(state_dict, os.path.join(output_path, WEIGHTS_NAME))
             print('model saved to', os.path.join(output_path, WEIGHTS_NAME))
-        
+
         if eval_dataloader is not None and load_best_model_at_last and save_best_model and evaluator is not None:
-            model = evaluator.clf
             state_dict = torch.load(os.path.join(best_save_path, WEIGHTS_NAME))
             model.load_state_dict(state_dict)
             print(f'load best checkpoint at last from {best_save_path}')
@@ -228,10 +227,8 @@ class Trainer:
             return transformers.get_cosine_with_hard_restarts_schedule_with_warmup(optimizer, num_warmup_steps=warmup_steps, num_training_steps=t_total)
         else:
             raise ValueError("Unknown scheduler {}".format(scheduler))
-    
+
     def _save_ckpt(self, model, save_dir):
         if not os.path.exists(save_dir): os.makedirs(save_dir)
         state_dict = model.state_dict()
         torch.save(state_dict, os.path.join(save_dir, WEIGHTS_NAME))
-
-
