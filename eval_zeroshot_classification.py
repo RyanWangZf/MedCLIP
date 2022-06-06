@@ -39,10 +39,10 @@ n_runs = 1
 # n_runs = 5
 
 # uncomment the following block for experiments
-# dataname = 'chexpert-5x200'
+dataname = 'chexpert-5x200'
 # dataname = 'mimic-5x200'
 # dataname = 'covid-test'
-dataname = 'rsna-test'
+# dataname = 'rsna-test'
 
 if dataname in ['chexpert-5x200', 'mimic-5x200']:
     tasks = constants.CHEXPERT_COMPETITION_TASKS
@@ -69,6 +69,8 @@ for i in range(n_runs):
         """ option 2: use pre-defined prompts from constants.py """
         cls_prompts = generate_chexpert_class_prompts(n=10)
 
+        assert list(cls_prompts.keys()) == tasks
+
         val_collate_fn = ZeroShotImageCollator(cls_prompts=cls_prompts, mode='multiclass')
         eval_dataloader = DataLoader(val_data,
                                      batch_size=128,
@@ -88,6 +90,9 @@ for i in range(n_runs):
         cls_prompts = generate_class_prompts(df_sent, ['No Finding'], n=10)
         covid_prompts = generate_covid_class_prompts(n=10)
         cls_prompts.update(covid_prompts)
+
+        assert list(cls_prompts.keys())[1] == tasks[1]
+
         val_collate_fn = ZeroShotImageCollator(mode='binary', cls_prompts=cls_prompts)
         eval_dataloader = DataLoader(val_data,
                                      batch_size=128,
@@ -107,6 +112,9 @@ for i in range(n_runs):
         cls_prompts = generate_class_prompts(df_sent, ['No Finding'], n=10)
         rsna_prompts = generate_rsna_class_prompts(n=10)
         cls_prompts.update(rsna_prompts)
+
+        assert list(cls_prompts.keys())[1] == tasks[1]
+
         val_collate_fn = ZeroShotImageCollator(mode='binary', cls_prompts=cls_prompts)
         eval_dataloader = DataLoader(val_data,
                                      batch_size=128,
