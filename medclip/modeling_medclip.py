@@ -7,6 +7,7 @@ from torch import nn
 from transformers import AutoModel, AutoTokenizer
 import numpy as np
 
+import copy
 
 from .vision_model import Uwinformer
 from . import constants
@@ -19,6 +20,7 @@ class MedClipTextModel(nn.Module):
         self.bert_type = bert_type
         self.last_n_layer = 4
         self.model = AutoModel.from_pretrained(self.bert_type, output_hidden_states=True)
+        # this tokenizer is actually not used
         self.tokenizer = AutoTokenizer.from_pretrained(self.bert_type)
         self.projection_head = nn.Linear(768, proj_dim)
     
@@ -242,6 +244,100 @@ class MedClipClassifier(nn.Module):
             loss = self.loss_fn(logits, labels)
             outputs['loss_value'] = loss
         return outputs
-    
 
 
+class PartiallyFixedEmbedding(nn.Module):
+    def __init__(self, fixed_weights, num_to_learn):
+        super().__init__()
+        print(f'{num_to_learn} new tokens added to the embedding layer.')
+        self.num_fixed = fixed_weights.size(0)
+        self.num_to_learn = num_to_learn
+        weight = torch.empty(self.num_fixed+num_to_learn, fixed_weights.size(1))
+        weight[:self.num_fixed] = fixed_weights
+        self.trainable_weight = nn.Parameter(torch.empty(num_to_learn, fixed_weights.size(1)))
+        nn.init.kaiming_uniform_(self.trainable_weight)
+        weight[self.num_fixed:] = self.trainable_weight
+        self.register_buffer('weight', weight)
+
+    def forward(self, inp):
+        self.weight.detach_()
+        self.weight[self.num_fixed:] = self.trainable_weight
+        return nn.functional.embedding(input=inp,
+                                       weight=self.weight,
+                                       padding_idx=None,
+                                       max_norm=None,
+                                       norm_type=2.0,
+                                       scale_grad_by_freq=False,
+                                       sparse=False)
+
+
+class MedClipPromptTuningClassifier(nn.Module):
+    '''take MedCLIP model with prompt tuning
+    '''
+    def __init__(self, medclip_model, n_context, class_specific_context, num_class, mode, ensemble=True, **kwargs) -> None:
+        super().__init__()
+        self.model = medclip_model
+        self.ensemble = ensemble
+        self.n_context = n_context
+        self.class_specific_context = class_specific_context
+        self.num_class = num_class
+        self.mode = mode
+        # calculate number of new context tokens
+        if class_specific_context:
+            self.n_new_tokens = n_context * num_class
+        else:
+            self.n_new_tokens = n_context
+        # add embeddings for new tokens
+        self.prev_n_tokens = self.model.text_model.model.embeddings.word_embeddings.num_embeddings
+        self.prev_embeddings = copy.deepcopy(self.model.text_model.model.embeddings.word_embeddings.weight.data)
+        self.model.text_model.model.embeddings.word_embeddings = PartiallyFixedEmbedding(
+            fixed_weights=self.prev_embeddings,
+            num_to_learn=self.n_new_tokens
+        )
+        # set loss function
+        assert mode.lower() in ['multiclass', 'multilabel', 'binary']
+        if mode == 'multilabel':
+            self.loss_fn = nn.BCEWithLogitsLoss()
+        else:
+            self.loss_fn = nn.CrossEntropyLoss()
+        return
+
+    def forward(self, pixel_values=None, prompt_inputs=None, labels=None, return_loss=True, **kwargs):
+        '''take image pixel values (after transform) and prompt_inputs
+        (a dict of {'class1':{'input_ids':...,'attention_mask':,...}), 'class2':...}
+        '''
+        pixel_values = pixel_values.cuda()
+        class_similarities = []
+        class_names = []
+        for cls_name, cls_text in prompt_inputs.items():
+            inputs = {'pixel_values':pixel_values}
+            for k in cls_text.keys(): inputs[k] = cls_text[k].cuda()
+
+            # TODO:
+            # take soft mask over class_prompts to reach the similarities to classes
+            medclip_outputs = self.model(**inputs)
+            logits = medclip_outputs['logits']
+
+            # take logits max as the class similarity
+            # cls_sim = torch.max(logits, 1)[0] # equivalent use only one prompt
+            if self.ensemble:
+                cls_sim = torch.mean(logits, 1) # equivalent to prompt ensembling
+            else:
+                cls_sim = torch.max(logits, 1)[0]
+            class_similarities.append(cls_sim)
+            class_names.append(cls_name)
+
+        class_similarities = torch.stack(class_similarities, 1)
+        outputs = {
+            'logits': class_similarities,
+            'class_names': class_names,
+        }
+
+        if labels is not None and return_loss:
+            labels = labels.cuda().float()
+            if len(labels.shape) == 1: labels = labels.view(-1,1)
+            if self.mode == 'multiclass': labels = labels.flatten().long()
+            loss = self.loss_fn(class_similarities, labels)
+            outputs['loss_value'] = loss
+
+        return outputs

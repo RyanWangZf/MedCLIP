@@ -2,14 +2,17 @@ import os
 import random
 
 import numpy as np
+import pandas as pd
 import torch
 from torch.utils.data import DataLoader
 from torchvision import transforms
 
 from medclip import constants
-from medclip.dataset import SuperviseImageDataset, SuperviseImageCollator
+from medclip.dataset import PromptTuningImageDataset, PromptTuningImageCollator
 from medclip.evaluator import Evaluator
-from medclip.modeling_medclip import MedClipVisionModel, MedClipClassifier
+from medclip.modeling_medclip import MedClipModel, MedClipPromptTuningClassifier
+from medclip.prompts import generate_class_prompts, generate_chexpert_class_prompts, generate_covid_class_prompts, \
+    generate_rsna_class_prompts
 from medclip.trainer import Trainer
 
 # set random seed
@@ -21,7 +24,7 @@ torch.cuda.manual_seed(seed)
 os.environ['PYTHONASHSEED'] = str(seed)
 os.environ['TOKENIZERS_PARALLELISM'] = 'False'
 
-# set cuda devices
+# setup cuda devices
 os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
@@ -35,6 +38,8 @@ train_config = {
     'eval_batch_size': 256,
     'eval_steps': 50,
     'save_steps': 50,
+    'n_context': 16,  # number of context tokens for prompt tuning
+    'class_specific_context': False,  # if true, each class will have a different set of context tokens
 }
 
 # uncomment the following block for experiments
@@ -43,12 +48,17 @@ dataname = 'chexpert-5x200'
 # dataname = 'covid'
 # dataname = 'rsna'
 
+df_sent = pd.read_csv('./local_data/sentence-label.csv', index_col=0)
 if dataname in ['chexpert-5x200', 'mimic-5x200']:
     tasks = constants.CHEXPERT_COMPETITION_TASKS
     num_class = 5
     mode = 'multiclass'
     train_dataname = f'{dataname}-finetune'
     val_dataname = dataname
+    """ option 1: use prompts from sentence database """
+    # cls_prompts = generate_class_prompts(df_sent, task=constants.CHEXPERT_COMPETITION_TASKS, n=10)
+    """ option 2: use pre-defined prompts from constants.py """
+    cls_prompts = generate_chexpert_class_prompts(n=10)
 elif dataname == 'covid':
     tasks = constants.COVID_TASKS
     num_class = 2
@@ -58,23 +68,20 @@ elif dataname == 'covid':
     """ option 2: use 10% training data """
     # train_dataname = f'{dataname}-0.1-train'
     val_dataname = f'{dataname}-test'
+    cls_prompts = generate_class_prompts(df_sent, ['No Finding'], n=10)
+    covid_prompts = generate_covid_class_prompts(n=10)
+    cls_prompts.update(covid_prompts)
 elif dataname == 'rsna':
     tasks = constants.RSNA_TASKS
     num_class = 2
     mode = 'binary'
     train_dataname = f'{dataname}-train'
     val_dataname = f'{dataname}-test'
+    cls_prompts = generate_class_prompts(df_sent, ['No Finding'], n=10)
+    rsna_prompts = generate_rsna_class_prompts(n=10)
+    cls_prompts.update(rsna_prompts)
 else:
     raise NotImplementedError
-
-# load the pretrained model and build the classifier
-vision_model = MedClipVisionModel(
-    # medclip_checkpoint='./checkpoints/vision_text_pretrain/25000'
-)
-clf = MedClipClassifier(vision_model,
-                        num_class=num_class,
-                        mode=mode)
-clf.cuda()
 
 # build dataloader
 transform = transforms.Compose([
@@ -84,29 +91,49 @@ transform = transforms.Compose([
     transforms.Resize((256, 256)),
     transforms.RandomCrop((constants.IMG_SIZE, constants.IMG_SIZE)),
     transforms.ToTensor(),
-    transforms.Normalize(mean=[constants.IMG_MEAN], std=[constants.IMG_STD])],
-)
+    transforms.Normalize(mean=[constants.IMG_MEAN], std=[constants.IMG_STD])])
 
-train_data = SuperviseImageDataset([train_dataname],
-                                   class_names=tasks,
-                                   imgtransform=transform)
-trainloader = DataLoader(train_data, batch_size=train_config['batch_size'],
+train_data = PromptTuningImageDataset([train_dataname],
+                                      class_names=tasks,
+                                      imgtransform=transform)
+collate_fn = PromptTuningImageCollator(cls_prompts=cls_prompts,
+                                       mode=mode,
+                                       n_context=train_config['n_context'],
+                                       class_specific_context=train_config['class_specific_context'])
+trainloader = DataLoader(train_data,
+                         batch_size=train_config['batch_size'],
                          shuffle=True,
-                         collate_fn=SuperviseImageCollator(mode=mode),
-                         num_workers=8,
+                         collate_fn=collate_fn,
+                         # num_workers=8,
                          )
-val_data = SuperviseImageDataset([val_dataname],
-                                 class_names=tasks,
-                                 )
-valloader = DataLoader(val_data, batch_size=train_config['eval_batch_size'],
+val_data = PromptTuningImageDataset([val_dataname],
+                                    class_names=tasks)
+valloader = DataLoader(val_data,
+                       batch_size=train_config['eval_batch_size'],
                        shuffle=False,
-                       collate_fn=SuperviseImageCollator(mode=mode),
-                       num_workers=4,
+                       collate_fn=collate_fn,
+                       # num_workers=4,
                        )
+
+# load the pretrained model and build the classifier
+model = MedClipModel(
+    # checkpoint='./checkpoints/vision_text_pretrain/25000',
+)
+model.cuda()
+clf = MedClipPromptTuningClassifier(model,
+                                    ensemble=True,
+                                    n_context=train_config['n_context'],
+                                    class_specific_context=train_config['class_specific_context'],
+                                    num_class=num_class,
+                                    mode=mode)
+clf.cuda()
+for name, param in clf.named_parameters():
+    if 'text_model.model.embeddings.word_embeddings' not in name:
+        param.requires_grad = False
 
 # build objective
 train_objectives = [(trainloader, clf, 1)]
-model_save_path = f'./checkpoints/{dataname}-finetune'
+model_save_path = f'./checkpoints/{dataname}-prompt-tuning'
 
 # build trainer
 trainer = Trainer()

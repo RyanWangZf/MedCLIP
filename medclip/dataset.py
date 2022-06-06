@@ -15,7 +15,7 @@ from PIL import Image
 from sklearn.preprocessing import OrdinalEncoder
 
 
-from .prompts import process_class_prompts
+from .prompts import process_class_prompts, process_class_prompts_for_tuning
 from .prompts import generate_chexpert_class_prompts
 from . import constants
 
@@ -25,8 +25,8 @@ from . import constants
 
 class ImageTextContrastiveDataset(Dataset):
     _labels_ = ['No Finding', 'Enlarged Cardiomediastinum', 'Cardiomegaly', 'Lung Lesion', 'Lung Opacity', 'Edema', 'Consolidation', 'Pneumonia', 'Atelectasis', 'Pneumothorax', 'Pleural Effusion', 'Pleural Other', 'Fracture', 'Support Devices']
-    def __init__(self, datalist=['chexpert', 'mimic-cxr', 'iuxray'], imgtransform=None) -> None:
-        '''support data list in iuxray, mimic-cxr, chexpert
+    def __init__(self, datalist=['mimic-cxr-train', 'chexpert-train'], imgtransform=None) -> None:
+        '''support data list in mimic-cxr-train, chexpert-train
         '''
         super().__init__()
         # imgpath, subject_id, report, labels...(14 labels)
@@ -232,7 +232,7 @@ class ZeroShotImageDataset(Dataset):
         class_names=None,
         imgtransform=None,
         ) -> None:
-        '''support data list in iuxray, mimic-cxr, chexpert, chexpert-5x200;
+        '''support data list in mimic-5x200, chexpert-5x200, rsna-test, covid-test
         args:
             imgtransform: a torchvision transform
             cls_prompts: a dict of prompt sentences, cls:[sent1, sent2, ..],
@@ -288,7 +288,7 @@ class ZeroShotImageCollator:
         self.mode = mode
 
         if cls_prompts is None:
-            self.cls_prompts = generate_chexpert_class_prompts(n=n_prompt)
+            raise NotImplementedError
         else:
             self.cls_prompts = cls_prompts
 
@@ -321,7 +321,8 @@ class SuperviseImageDataset(Dataset):
         class_names=None,
         imgtransform=None,
         ) -> None:
-        '''support data list in iuxray, mimic-cxr, chexpert, chexpert, covid19;
+        '''support data list in mimic-5x200, mimic-5x200-finetune, chexpert-5x200, chexpert-5x200-finetune,
+        rsna-test, rsna-train, covid-test, covid-train, covid-0.1-train
         args:
             imgtransform: a torchvision transform
             class_names: a list of class names
@@ -390,3 +391,94 @@ class SuperviseImageCollator:
             'pixel_values': inputs['pixel_values'],
             'labels': inputs['labels'],
             }
+
+
+class PromptTuningImageDataset(Dataset):
+    def __init__(self,
+                 datalist=['chexpert-5x200'],
+                 class_names=None,
+                 imgtransform=None,
+                 ) -> None:
+        '''support data list in mimic-5x200, mimic-5x200-finetune, chexpert-5x200, chexpert-5x200-finetune,
+        rsna-test, rsna-train, covid-test, covid-train, covid-0.1-train
+        args:
+            imgtransform: a torchvision transform
+            cls_prompts: a dict of prompt sentences, cls:[sent1, sent2, ..],
+        '''
+        super().__init__()
+
+        if imgtransform is None:
+            self.transform = transforms.Compose([
+                transforms.Resize((constants.IMG_SIZE, constants.IMG_SIZE)),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.5862785803043838], std=[0.27950088968644304])]
+            )
+        else:
+            self.transform = imgtransform
+
+        self.class_names = class_names
+
+        # imgpath, subject_id, report, labels...(14 labels)
+        df_list = []
+        for data in datalist:
+            filename = f'./local_data/{data}-meta.csv'
+            print('load data from', filename)
+            df = pd.read_csv(filename, index_col=0)
+            df_list.append(df)
+        self.df = pd.concat(df_list, axis=0).reset_index(drop=True)
+
+    def __getitem__(self, index):
+        row = self.df.iloc[index]
+        img = Image.open(row.imgpath)
+        img = self._pad_img(img)
+        img = self.transform(img).unsqueeze(1)
+        label = pd.DataFrame(row[self.class_names]).transpose()
+        return img, label
+
+    def _pad_img(self, img, min_size=224, fill_color=0):
+        '''pad img to square.
+        '''
+        x, y = img.size
+        size = max(min_size, x, y)
+        new_im = Image.new('L', (size, size), fill_color)
+        new_im.paste(img, (int((size - x) / 2), int((size - y) / 2)))
+        return new_im
+
+    def __len__(self):
+        return len(self.df)
+
+
+class PromptTuningImageCollator:
+    def __init__(self, mode, cls_prompts=None, n_prompt=5, n_context=16, class_specific_context=False):
+        assert mode in ['multiclass', 'multilabel', 'binary']
+        self.mode = mode
+
+        if cls_prompts is None:
+            raise NotImplementedError
+        else:
+            self.cls_prompts = cls_prompts
+
+        # process cls prompts into texts indices
+        self.prompt_texts_inputs = process_class_prompts_for_tuning(self.cls_prompts,
+                                                                    n_context=n_context,
+                                                                    class_specific_context=class_specific_context)
+
+    def __call__(self, batch):
+        inputs = defaultdict(list)
+        for data in batch:
+            inputs['pixel_values'].append(data[0])
+            inputs['labels'].append(data[1])
+
+        inputs['labels'] = pd.concat(inputs['labels']).astype(int).values
+        if self.mode in ['multiclass', 'binary']:
+            inputs['labels'] = torch.tensor(inputs['labels'].argmax(1), dtype=int)
+        else:
+            inputs['labels'] = torch.tensor(inputs['labels'], dtype=float)
+
+        inputs['pixel_values'] = torch.cat(inputs['pixel_values'], 0)
+        if inputs['pixel_values'].shape[1] == 1: inputs['pixel_values'] = inputs['pixel_values'].repeat((1, 3, 1, 1))
+        return {
+            'pixel_values': inputs['pixel_values'],
+            'prompt_inputs': self.prompt_texts_inputs,
+            'labels': inputs['labels'],
+        }
