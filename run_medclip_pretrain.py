@@ -24,17 +24,17 @@ os.environ['PYTHONASHSEED'] = str(seed)
 os.environ['TOKENIZERS_PARALLELISM']='false'
 
 # set cuda devices
-os.environ['CUDA_VISIBLE_DEVICES']='1'
+os.environ['CUDA_VISIBLE_DEVICES']='3'
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
 # set training configurations
 train_config = {
-    'batch_size': 100,
+    'batch_size': 128,
     'num_epochs': 10,
     'warmup': 0.1, # the first 10% of training steps are used for warm-up
     'lr': 5e-5,
     'weight_decay': 1e-4,
-    'eval_batch_size': 128,
+    'eval_batch_size': 256,
     'eval_steps': 1000,
     'save_steps': 1000,
 }
