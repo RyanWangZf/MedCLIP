@@ -1,8 +1,8 @@
 import os
+import random
 
 import numpy as np
 import pandas as pd
-import random
 import torch
 from torch.utils.data import DataLoader
 from torchvision import transforms
@@ -11,11 +11,9 @@ from medclip import constants
 from medclip.dataset import PromptTuningImageDataset, PromptTuningImageCollator
 from medclip.evaluator import Evaluator
 from medclip.modeling_medclip import MedClipModel, MedClipPromptTuningClassifier
-from medclip.prompts import generate_class_prompts
+from medclip.prompts import generate_class_prompts, generate_chexpert_class_prompts, generate_covid_class_prompts, \
+    generate_rsna_class_prompts
 from medclip.trainer import Trainer
-
-# setup cuda devices
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 
 # set random seed
 seed = 42
@@ -24,50 +22,66 @@ np.random.seed(seed)
 torch.manual_seed(seed)
 torch.cuda.manual_seed(seed)
 os.environ['PYTHONASHSEED'] = str(seed)
-os.environ['TOKENIZERS_PARALLELISM'] = 'false'
+os.environ['TOKENIZERS_PARALLELISM'] = 'False'
+
+# setup cuda devices
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
 # setup training configurations
-# uncomment the following block for experiments
 train_config = {
     'batch_size': 64,
     'num_epochs': 20,
-    'warmup': 0.1, # the first 10% of training steps are used for warm-up
+    'warmup': 0.1,  # the first 10% of training steps are used for warm-up
     'lr': 5e-4,
     'weight_decay': 0,
     'eval_batch_size': 256,
     'eval_steps': 50,
     'save_steps': 50,
-    'n_context': 16,
-    'class_specific_context': False,
+    'n_context': 16,  # number of context tokens for prompt tuning
+    'class_specific_context': False,  # if true, each class will have a different set of context tokens
 }
 
-# setup dataset name & config
 # uncomment the following block for experiments
-
-# ############################
-# dataname = 'rsna'
-# mode = 'binary'
-# num_class = 2
-# ############################
-
-# ############################
 dataname = 'chexpert-5x200'
-# dataname = 'iuxray-5x200'
 # dataname = 'mimic-5x200'
-mode = 'multiclass'
-num_class = 5
-tasks = constants.CHEXPERT_COMPETITION_TASKS
-# ############################
+# dataname = 'covid'
+# dataname = 'rsna'
 
-# ############################
-# dataname = 'covid19-balance'
-# mode = 'binary'
-# tasks = constants.COVID_TASKS
-# num_class = 2
-# ############################
-
-# generate class prompts by sampling from sentences
 df_sent = pd.read_csv('./local_data/sentence-label.csv', index_col=0)
+if dataname in ['chexpert-5x200', 'mimic-5x200']:
+    tasks = constants.CHEXPERT_COMPETITION_TASKS
+    num_class = 5
+    mode = 'multiclass'
+    train_dataname = f'{dataname}-finetune'
+    val_dataname = dataname
+    """ option 1: use prompts from sentence database """
+    # cls_prompts = generate_class_prompts(df_sent, task=constants.CHEXPERT_COMPETITION_TASKS, n=10)
+    """ option 2: use pre-defined prompts from constants.py """
+    cls_prompts = generate_chexpert_class_prompts(n=10)
+elif dataname == 'covid':
+    tasks = constants.COVID_TASKS
+    num_class = 2
+    mode = 'binary'
+    """ option 1: use entire training data """
+    train_dataname = f'{dataname}-train'
+    """ option 2: use 10% training data """
+    # train_dataname = f'{dataname}-0.1-train'
+    val_dataname = f'{dataname}-test'
+    cls_prompts = generate_class_prompts(df_sent, ['No Finding'], n=10)
+    covid_prompts = generate_covid_class_prompts(n=10)
+    cls_prompts.update(covid_prompts)
+elif dataname == 'rsna':
+    tasks = constants.RSNA_TASKS
+    num_class = 2
+    mode = 'binary'
+    train_dataname = f'{dataname}-train'
+    val_dataname = f'{dataname}-test'
+    cls_prompts = generate_class_prompts(df_sent, ['No Finding'], n=10)
+    rsna_prompts = generate_rsna_class_prompts(n=10)
+    cls_prompts.update(rsna_prompts)
+else:
+    raise NotImplementedError
 
 # build dataloader
 transform = transforms.Compose([
@@ -79,29 +93,25 @@ transform = transforms.Compose([
     transforms.ToTensor(),
     transforms.Normalize(mean=[constants.IMG_MEAN], std=[constants.IMG_STD])])
 
-cls_prompts = generate_class_prompts(df_sent, task=constants.CHEXPERT_COMPETITION_TASKS, n=10)
-
-train_data = PromptTuningImageDataset([f'{dataname}-train'],
+train_data = PromptTuningImageDataset([train_dataname],
                                       class_names=tasks,
                                       imgtransform=transform)
+collate_fn = PromptTuningImageCollator(cls_prompts=cls_prompts,
+                                       mode=mode,
+                                       n_context=train_config['n_context'],
+                                       class_specific_context=train_config['class_specific_context'])
 trainloader = DataLoader(train_data,
                          batch_size=train_config['batch_size'],
                          shuffle=True,
-                         collate_fn=PromptTuningImageCollator(cls_prompts=cls_prompts,
-                                                              mode=mode,
-                                                              n_context=train_config['n_context'],
-                                                              class_specific_context=train_config['class_specific_context']),
+                         collate_fn=collate_fn,
                          # num_workers=8,
                          )
-val_data = PromptTuningImageDataset([f'{dataname}-test'],
+val_data = PromptTuningImageDataset([val_dataname],
                                     class_names=tasks)
 valloader = DataLoader(val_data,
                        batch_size=train_config['eval_batch_size'],
                        shuffle=False,
-                       collate_fn=PromptTuningImageCollator(cls_prompts=cls_prompts,
-                                                            mode=mode,
-                                                            n_context=train_config['n_context'],
-                                                            class_specific_context=train_config['class_specific_context']),
+                       collate_fn=collate_fn,
                        # num_workers=4,
                        )
 
@@ -110,21 +120,20 @@ model = MedClipModel(
     # checkpoint='./checkpoints/vision_text_pretrain/25000',
 )
 model.cuda()
-if train_config['class_specific_context']:
-    n_new_token = train_config['n_context'] * len(cls_prompts)
-else:
-    n_new_token = train_config['n_context']
 clf = MedClipPromptTuningClassifier(model,
                                     ensemble=True,
-                                    n_new_token=train_config['n_context'])
+                                    n_context=train_config['n_context'],
+                                    class_specific_context=train_config['class_specific_context'],
+                                    num_class=num_class,
+                                    mode=mode)
 clf.cuda()
-# for name, param in clf.named_parameters():
-#     if name not in ['fc.weight', 'fc.bias']:
-#         param.requires_grad = False
+for name, param in clf.named_parameters():
+    if 'text_model.model.embeddings.word_embeddings' not in name:
+        param.requires_grad = False
 
 # build objective
 train_objectives = [(trainloader, clf, 1)]
-model_save_path = f'./checkpoints/{dataname}-prompttune'
+model_save_path = f'./checkpoints/{dataname}-prompt-tuning'
 
 # build trainer
 trainer = Trainer()
