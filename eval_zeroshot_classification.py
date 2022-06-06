@@ -12,7 +12,8 @@ from medclip.dataset import ZeroShotImageCollator
 from medclip.dataset import ZeroShotImageDataset
 from medclip.evaluator import Evaluator
 from medclip.modeling_medclip import MedClipModel, MedClipPromptClassifier
-from medclip.prompts import generate_class_prompts, generate_chexpert_class_prompts, generate_covid_class_prompts, generate_rsna_class_prompts
+from medclip.prompts import generate_class_prompts, generate_chexpert_class_prompts, generate_covid_class_prompts, \
+    generate_rsna_class_prompts
 
 # set random seed
 seed = 42
@@ -104,8 +105,8 @@ for i in range(n_runs):
 
     elif dataname == 'rsna-test':
         cls_prompts = generate_class_prompts(df_sent, ['No Finding'], n=10)
-        covid_prompts = generate_rsna_class_prompts(n=10)
-        cls_prompts.update(covid_prompts)
+        rsna_prompts = generate_rsna_class_prompts(n=10)
+        cls_prompts.update(rsna_prompts)
         val_collate_fn = ZeroShotImageCollator(mode='binary', cls_prompts=cls_prompts)
         eval_dataloader = DataLoader(val_data,
                                      batch_size=128,

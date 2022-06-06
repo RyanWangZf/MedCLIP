@@ -288,7 +288,7 @@ class ZeroShotImageCollator:
         self.mode = mode
 
         if cls_prompts is None:
-            self.cls_prompts = generate_chexpert_class_prompts(n=n_prompt)
+            raise NotImplementedError
         else:
             self.cls_prompts = cls_prompts
 
@@ -454,7 +454,7 @@ class PromptTuningImageCollator:
         self.mode = mode
 
         if cls_prompts is None:
-            self.cls_prompts = generate_chexpert_class_prompts(n=n_prompt)
+            raise NotImplementedError
         else:
             self.cls_prompts = cls_prompts
 
