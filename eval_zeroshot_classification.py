@@ -30,25 +30,25 @@ device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
 # build medclip model and load from the pretrained checkpoint
 model = MedClipModel(
-    # checkpoint='./checkpoints/vision_text_pretrain/25000',
+    checkpoint='/srv/local/data/MedCLIP/checkpoints/vision_text_pretrain/21000/',
 )
 model.cuda()
 
 # setup config
-n_runs = 1
-# n_runs = 5
+n_runs = 5
+ensemble = False
 
 # uncomment the following block for experiments
-dataname = 'chexpert-5x200'
+# dataname = 'chexpert-5x200'
 # dataname = 'mimic-5x200'
 # dataname = 'covid-test'
-# dataname = 'rsna-test'
+dataname = 'rsna-balanced-test'
 
 if dataname in ['chexpert-5x200', 'mimic-5x200']:
     tasks = constants.CHEXPERT_COMPETITION_TASKS
 elif dataname == 'covid-test':
     tasks = constants.COVID_TASKS
-elif dataname == 'rsna-test':
+elif dataname == 'rsna-balanced-test':
     tasks = constants.RSNA_TASKS
 else:
     raise NotImplementedError
@@ -79,7 +79,7 @@ for i in range(n_runs):
                                      pin_memory=True,
                                      num_workers=8,
                                      )
-        medclip_clf = MedClipPromptClassifier(model, ensemble=True)
+        medclip_clf = MedClipPromptClassifier(model, ensemble=ensemble)
         evaluator = Evaluator(
             medclip_clf=medclip_clf,
             eval_dataloader=eval_dataloader,
@@ -101,14 +101,14 @@ for i in range(n_runs):
                                      pin_memory=True,
                                      num_workers=8,
                                      )
-        medclip_clf = MedClipPromptClassifier(model, ensemble=False)
+        medclip_clf = MedClipPromptClassifier(model, ensemble=ensemble)
         evaluator = Evaluator(
             medclip_clf=medclip_clf,
             eval_dataloader=eval_dataloader,
             mode='binary',
         )
 
-    elif dataname == 'rsna-test':
+    elif dataname == 'rsna-balanced-test':
         cls_prompts = generate_class_prompts(df_sent, ['No Finding'], n=10)
         rsna_prompts = generate_rsna_class_prompts(n=10)
         cls_prompts.update(rsna_prompts)
@@ -123,7 +123,7 @@ for i in range(n_runs):
                                      pin_memory=True,
                                      num_workers=8,
                                      )
-        medclip_clf = MedClipPromptClassifier(model, ensemble=False)
+        medclip_clf = MedClipPromptClassifier(model, ensemble=ensemble)
         evaluator = Evaluator(
             medclip_clf=medclip_clf,
             eval_dataloader=eval_dataloader,
