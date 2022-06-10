@@ -232,7 +232,7 @@ class ZeroShotImageDataset(Dataset):
         class_names=None,
         imgtransform=None,
         ) -> None:
-        '''support data list in mimic-5x200, chexpert-5x200, rsna-test, covid-test
+        '''support data list in mimic-5x200, chexpert-5x200, rsna-balanced-test, covid-test
         args:
             imgtransform: a torchvision transform
             cls_prompts: a dict of prompt sentences, cls:[sent1, sent2, ..],
@@ -322,7 +322,7 @@ class SuperviseImageDataset(Dataset):
         imgtransform=None,
         ) -> None:
         '''support data list in mimic-5x200, mimic-5x200-finetune, chexpert-5x200, chexpert-5x200-finetune,
-        rsna-test, rsna-train, covid-test, covid-train, covid-0.1-train
+        rsna-balanced-test, rsna-balanced-train, covid-test, covid-train, covid-0.1-train
         args:
             imgtransform: a torchvision transform
             class_names: a list of class names
@@ -400,7 +400,7 @@ class PromptTuningImageDataset(Dataset):
                  imgtransform=None,
                  ) -> None:
         '''support data list in mimic-5x200, mimic-5x200-finetune, chexpert-5x200, chexpert-5x200-finetune,
-        rsna-test, rsna-train, covid-test, covid-train, covid-0.1-train
+        rsna-balanced-test, rsna-balanced-train, covid-test, covid-train, covid-0.1-train
         args:
             imgtransform: a torchvision transform
             cls_prompts: a dict of prompt sentences, cls:[sent1, sent2, ..],
