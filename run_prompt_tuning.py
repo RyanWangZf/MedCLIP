@@ -39,7 +39,8 @@ train_config = {
     'eval_steps': 50,
     'save_steps': 50,
     'n_context': 16,  # number of context tokens for prompt tuning
-    'class_specific_context': False,  # if true, each class will have a different set of context tokens
+    'class_specific_context': False,  # if true, each class will have a different set of context tokens,
+    'ensemble': True
 }
 
 # uncomment the following block for experiments
@@ -83,6 +84,9 @@ elif dataname == 'rsna':
 else:
     raise NotImplementedError
 
+""" option: use class name as prompts """
+# cls_prompts = {task: task for task in tasks}
+
 # build dataloader
 transform = transforms.Compose([
     transforms.RandomHorizontalFlip(0.5),
@@ -104,7 +108,7 @@ trainloader = DataLoader(train_data,
                          batch_size=train_config['batch_size'],
                          shuffle=True,
                          collate_fn=collate_fn,
-                         # num_workers=8,
+                         num_workers=8,
                          )
 val_data = PromptTuningImageDataset([val_dataname],
                                     class_names=tasks)
@@ -112,16 +116,16 @@ valloader = DataLoader(val_data,
                        batch_size=train_config['eval_batch_size'],
                        shuffle=False,
                        collate_fn=collate_fn,
-                       # num_workers=4,
+                       num_workers=4,
                        )
 
 # load the pretrained model and build the classifier
 model = MedClipModel(
-    # checkpoint='./checkpoints/vision_text_pretrain/25000',
+    checkpoint='/srv/local/data/MedCLIP/checkpoints/vision_text_pretrain/21000/'
 )
 model.cuda()
 clf = MedClipPromptTuningClassifier(model,
-                                    ensemble=True,
+                                    ensemble=train_config['ensemble'],
                                     n_context=train_config['n_context'],
                                     class_specific_context=train_config['class_specific_context'],
                                     num_class=num_class,

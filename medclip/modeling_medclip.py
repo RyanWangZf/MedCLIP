@@ -68,7 +68,7 @@ class MedClipVisionModel(nn.Module):
         print('unexpected keys:', unexpected_keys)
         print('load model weight from:', checkpoint)
 
-    def forward(self, pixel_values):
+    def forward(self, pixel_values, **kwargs):
         '''args:
         pixel_values: tensor with shape [bs, 3, img_size, img_size]
         '''
