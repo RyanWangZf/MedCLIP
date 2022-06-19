@@ -58,8 +58,8 @@ elif dataname == 'covid':
     """ option 1: use entire training data """
     # train_dataname = f'{dataname}-train'
     """ option 2: use x% training data """
-    train_dataname = f'{dataname}-0.1-train'
-    # train_dataname = f'{dataname}-0.2-train'
+    # train_dataname = f'{dataname}-0.1-train'
+    train_dataname = f'{dataname}-0.2-train'
     val_dataname = f'{dataname}-test'
 elif dataname == 'covid-2x200':
     tasks = constants.COVID_TASKS
