@@ -44,4 +44,4 @@ df_test = df_test.sample(n=3000)
 df_train = df_bin[~df_bin['imgpath'].isin(df_test['imgpath'])]
 df_train.to_csv(f'{tgt_dir}/covid-train-meta.csv')
 df_test.to_csv(f'{tgt_dir}/covid-test-meta.csv')
-df_train.sample(frac=0.1).to_csv(f'{tgt_dir}/covid-0.1-train.csv')
+df_train.sample(frac=0.1).to_csv(f'{tgt_dir}/covid-0.1-train-meta.csv')
