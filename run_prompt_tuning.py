@@ -31,7 +31,7 @@ device = "cuda:0" if torch.cuda.is_available() else "cpu"
 # setup training configurations
 train_config = {
     'batch_size': 64,
-    'num_epochs': 20,
+    'num_epochs': 10,
     'warmup': 0.1,  # the first 10% of training steps are used for warm-up
     'lr': 5e-4,
     'weight_decay': 0,
@@ -44,10 +44,10 @@ train_config = {
 }
 
 # uncomment the following block for experiments
-dataname = 'chexpert-5x200'
+# dataname = 'chexpert-5x200'
 # dataname = 'mimic-5x200'
 # dataname = 'covid'
-# dataname = 'rsna'
+dataname = 'rsna'
 
 df_sent = pd.read_csv('./local_data/sentence-label.csv', index_col=0)
 if dataname in ['chexpert-5x200', 'mimic-5x200']:

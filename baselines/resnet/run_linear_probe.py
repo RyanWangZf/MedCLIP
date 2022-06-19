@@ -1,47 +1,51 @@
 import os
 import random
+from collections import defaultdict
 
 import numpy as np
 import torch
+import torchvision
+from torch import nn
 from torch.utils.data import DataLoader
 from torchvision import transforms
 
 from medclip import constants
 from medclip.dataset import SuperviseImageDataset, SuperviseImageCollator
 from medclip.evaluator import Evaluator
-from medclip.modeling_medclip import MedClipVisionModel, MedClipClassifier
 from medclip.trainer import Trainer
 
-# set random seed
+# configuration
 seed = 42
 random.seed(seed)
 np.random.seed(seed)
 torch.manual_seed(seed)
 torch.cuda.manual_seed(seed)
 os.environ['PYTHONASHSEED'] = str(seed)
-os.environ['TOKENIZERS_PARALLELISM'] = 'False'
+os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 
 # set cuda devices
-os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
-# setup training configurations
 train_config = {
     'batch_size': 64,
-    'num_epochs': 20,
+    'num_epochs': 10,
     'warmup': 0.1,  # the first 10% of training steps are used for warm-up
     'lr': 5e-4,
     'weight_decay': 0,
     'eval_batch_size': 256,
     'eval_steps': 50,
     'save_steps': 50,
+    'imagenet_weights': False
 }
 
 # uncomment the following block for experiments
-dataname = 'chexpert-5x200'
-# dataname = 'mimic-5x200'
+# dataname = 'chexpert-5x200'
+dataname = 'mimic-5x200'
 # dataname = 'covid'
-# dataname = 'rsna'
+# dataname = 'covid-2x200'
+# dataname = 'rsna-balanced'
+# dataname = 'rsna-2x200'
 
 if dataname in ['chexpert-5x200', 'mimic-5x200']:
     tasks = constants.CHEXPERT_COMPETITION_TASKS
@@ -54,11 +58,18 @@ elif dataname == 'covid':
     num_class = 2
     mode = 'binary'
     """ option 1: use entire training data """
-    train_dataname = f'{dataname}-train'
-    """ option 2: use 10% training data """
+    # train_dataname = f'{dataname}-train'
+    """ option 2: use x% training data """
     # train_dataname = f'{dataname}-0.1-train'
+    train_dataname = f'{dataname}-0.2-train'
     val_dataname = f'{dataname}-test'
-elif dataname == 'rsna':
+elif dataname == 'covid-2x200':
+    tasks = constants.COVID_TASKS
+    num_class = 2
+    mode = 'binary'
+    train_dataname = f'{dataname}-train'
+    val_dataname = f'{dataname}-test'
+elif dataname in ['rsna-balanced', 'rsna-2x200']:
     tasks = constants.RSNA_TASKS
     num_class = 2
     mode = 'binary'
@@ -67,14 +78,50 @@ elif dataname == 'rsna':
 else:
     raise NotImplementedError
 
+
+class ResnetClassifier(nn.Module):
+    def __init__(self,
+                 num_class=None,
+                 mode=None,
+                 pretrained=False,
+                 ):
+        super().__init__()
+        self.num_class = num_class
+        self.mode = mode.lower()
+        if num_class > 2:
+            if mode == 'multiclass':
+                self.loss_fn = nn.CrossEntropyLoss()
+            else:
+                self.loss_fn = nn.BCEWithLogitsLoss()
+        else:
+            self.loss_fn = nn.BCEWithLogitsLoss()
+            num_class = 1
+        self.model = torchvision.models.resnet50(pretrained=pretrained)
+        num_fts = self.model.fc.in_features
+        self.model.fc = nn.Linear(num_fts, num_class)
+
+    def forward(self,
+                pixel_values,
+                labels=None,
+                return_loss=True,
+                **kwargs,
+                ):
+        outputs = defaultdict()
+        pixel_values = pixel_values.cuda()
+        # take embeddings before the projection head
+        logits = self.model(pixel_values)
+        outputs['logits'] = logits
+        if labels is not None and return_loss:
+            labels = labels.cuda().float()
+            if len(labels.shape) == 1: labels = labels.view(-1, 1)
+            if self.mode == 'multiclass': labels = labels.flatten().long()
+            loss = self.loss_fn(logits, labels)
+            outputs['loss_value'] = loss
+        return outputs
+
+
 # load the pretrained model and build the classifier
-vision_model = MedClipVisionModel(
-    # medclip_checkpoint='./checkpoints/vision_text_pretrain/25000'
-)
-clf = MedClipClassifier(vision_model,
-                        num_class=num_class,
-                        mode=mode)
-clf.cuda()
+clf = ResnetClassifier(num_class=num_class, mode=mode, pretrained=train_config['imagenet_weights'])
 
 # build dataloader
 transform = transforms.Compose([
@@ -106,7 +153,7 @@ valloader = DataLoader(val_data, batch_size=train_config['eval_batch_size'],
 
 # build objective
 train_objectives = [(trainloader, clf, 1)]
-model_save_path = f'./checkpoints/{dataname}-finetune'
+model_save_path = f'./checkpoints/{dataname}-linear-probe'
 
 # build trainer
 trainer = Trainer()
