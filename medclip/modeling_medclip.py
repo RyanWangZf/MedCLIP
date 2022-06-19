@@ -16,14 +16,15 @@ from . import constants
 class MedClipTextModel(nn.Module):
     def __init__(self,
         bert_type=constants.BERT_TYPE,
-        proj_dim = 512) -> None:
+        proj_dim = 512,
+        proj_bias = False) -> None:
         super().__init__()
         self.bert_type = bert_type
         self.last_n_layer = 4
         self.model = AutoModel.from_pretrained(self.bert_type, output_hidden_states=True)
         # this tokenizer is actually not used
         self.tokenizer = AutoTokenizer.from_pretrained(self.bert_type)
-        self.projection_head = nn.Linear(768, proj_dim, bias=False)
+        self.projection_head = nn.Linear(768, proj_dim, bias=proj_bias)
 
     def forward(self, input_ids, attention_mask):
         output = self.model(input_ids=input_ids, attention_mask=attention_mask)
@@ -68,7 +69,7 @@ class MedClipVisionModel(nn.Module):
         print('unexpected keys:', unexpected_keys)
         print('load model weight from:', checkpoint)
 
-    def forward(self, pixel_values):
+    def forward(self, pixel_values, **kwargs):
         '''args:
         pixel_values: tensor with shape [bs, 3, img_size, img_size]
         '''
@@ -123,13 +124,15 @@ class MedClipVisionModelViT(nn.Module):
 
 class MedClipModel(nn.Module):
     def __init__(self,
+        vision_cls=MedClipVisionModel,
         checkpoint=None,
         vision_checkpoint=None,
         logit_scale_init_value=0.07,
+        text_proj_bias = False
         ) -> None:
         super().__init__()
-        self.vision_model = MedClipVisionModel(checkpoint=vision_checkpoint)
-        self.text_model = MedClipTextModel()
+        self.vision_model = vision_cls(checkpoint=vision_checkpoint)
+        self.text_model = MedClipTextModel(proj_bias=text_proj_bias)
 
         # learnable temperature for contrastive loss
         self.logit_scale = nn.Parameter(torch.log(torch.tensor(1/logit_scale_init_value)))
@@ -376,7 +379,7 @@ class MedClipPromptTuningClassifier(nn.Module):
         if labels is not None and return_loss:
             labels = labels.cuda().float()
             if len(labels.shape) == 1: labels = labels.view(-1,1)
-            if self.mode == 'multiclass': labels = labels.flatten().long()
+            if self.mode in ['multiclass', 'binary']: labels = labels.flatten().long()
             loss = self.loss_fn(class_similarities, labels)
             outputs['loss_value'] = loss
 

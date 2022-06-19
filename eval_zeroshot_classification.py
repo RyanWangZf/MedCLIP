@@ -11,7 +11,7 @@ from medclip import constants
 from medclip.dataset import ZeroShotImageCollator
 from medclip.dataset import ZeroShotImageDataset
 from medclip.evaluator import Evaluator
-from medclip.modeling_medclip import MedClipModel, MedClipPromptClassifier
+from medclip.modeling_medclip import MedClipModel, MedClipPromptClassifier, MedClipVisionModel, MedClipVisionModelViT
 from medclip.prompts import generate_class_prompts, generate_chexpert_class_prompts, generate_covid_class_prompts, \
     generate_rsna_class_prompts
 
@@ -28,21 +28,31 @@ os.environ['TOKENIZERS_PARALLELISM'] = 'False'
 os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
-# build medclip model and load from the pretrained checkpoint
-model = MedClipModel(
-    checkpoint='/srv/local/data/MedCLIP/checkpoints/vision_text_pretrain/21000/',
-)
-model.cuda()
-
 # setup config
 n_runs = 5
-ensemble = False
+ensemble = True
+vit = True
+
+# build medclip model and load from the pretrained checkpoint
+if vit:
+    model = MedClipModel(
+        vision_cls=MedClipVisionModelViT,
+        text_proj_bias=True,
+        checkpoint='/srv/local/data/MedCLIP/checkpoints/vision_text_pretrain/25000/',
+    )
+else:
+    model = MedClipModel(
+        vision_cls=MedClipVisionModel,
+        text_proj_bias=False,
+        checkpoint='/srv/local/data/MedCLIP/checkpoints/vision_text_pretrain/21000/',
+    )
+model.cuda()
 
 # uncomment the following block for experiments
-# dataname = 'chexpert-5x200'
+dataname = 'chexpert-5x200'
 # dataname = 'mimic-5x200'
 # dataname = 'covid-test'
-dataname = 'rsna-balanced-test'
+# dataname = 'rsna-balanced-test'
 
 if dataname in ['chexpert-5x200', 'mimic-5x200']:
     tasks = constants.CHEXPERT_COMPETITION_TASKS
