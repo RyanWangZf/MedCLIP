@@ -75,9 +75,9 @@ for i in range(n_runs):
 
     if dataname in ['chexpert-5x200', 'mimic-5x200']:
         """ option 1: use prompts from sentence database """
-        cls_prompts = generate_class_prompts(df_sent, task=constants.CHEXPERT_COMPETITION_TASKS, n=10)
+        # cls_prompts = generate_class_prompts(df_sent, task=constants.CHEXPERT_COMPETITION_TASKS, n=10)
         """ option 2: use pre-defined prompts from constants.py """
-        # cls_prompts = generate_chexpert_class_prompts(n=10)
+        cls_prompts = generate_chexpert_class_prompts(n=10)
 
         assert list(cls_prompts.keys()) == tasks
 
