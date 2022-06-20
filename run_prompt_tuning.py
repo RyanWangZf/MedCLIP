@@ -36,19 +36,21 @@ train_config = {
     'lr': 5e-4,
     'weight_decay': 0,
     'eval_batch_size': 256,
-    'eval_steps': 50,
-    'save_steps': 50,
-    'n_context': 0,  # number of context tokens for prompt tuning
+    'eval_steps': 10,
+    'save_steps': 10,
+    'n_context': 16,  # number of context tokens for prompt tuning
     'class_specific_context': False,  # if true, each class will have a different set of context tokens,
-    'joint_train_emb': True,    # if true, the previous word embedings will be jointly trained
-    'ensemble': True,
+    'joint_train_emb': False,    # if true, the previous word embedings will be jointly trained
+    'ensemble': False,
 }
 
 # uncomment the following block for experiments
-dataname = 'chexpert-5x200'
+# dataname = 'chexpert-5x200'
 # dataname = 'mimic-5x200'
 # dataname = 'covid'
-# dataname = 'rsna'
+dataname = 'covid-2x200'
+# dataname = 'rsna-balanced'
+# dataname = 'rsna-2x200'
 
 df_sent = pd.read_csv('./local_data/sentence-label.csv', index_col=0)
 if dataname in ['chexpert-5x200', 'mimic-5x200']:
@@ -73,7 +75,16 @@ elif dataname == 'covid':
     cls_prompts = generate_class_prompts(df_sent, ['No Finding'], n=10)
     covid_prompts = generate_covid_class_prompts(n=10)
     cls_prompts.update(covid_prompts)
-elif dataname == 'rsna':
+elif dataname == 'covid-2x200':
+    tasks = constants.COVID_TASKS
+    num_class = 2
+    mode = 'binary'
+    train_dataname = f'{dataname}-train'
+    val_dataname = f'{dataname}-test'
+    cls_prompts = generate_class_prompts(df_sent, ['No Finding'], n=10)
+    covid_prompts = generate_covid_class_prompts(n=10)
+    cls_prompts.update(covid_prompts)
+elif dataname in ['rsna-balanced', 'rsna-2x200']:
     tasks = constants.RSNA_TASKS
     num_class = 2
     mode = 'binary'
