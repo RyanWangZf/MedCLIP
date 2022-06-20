@@ -38,16 +38,17 @@ train_config = {
     'eval_batch_size': 256,
     'eval_steps': 50,
     'save_steps': 50,
-    'n_context': 16,  # number of context tokens for prompt tuning
+    'n_context': 0,  # number of context tokens for prompt tuning
     'class_specific_context': False,  # if true, each class will have a different set of context tokens,
-    'ensemble': True
+    'joint_train_emb': True,    # if true, the previous word embedings will be jointly trained
+    'ensemble': True,
 }
 
 # uncomment the following block for experiments
-# dataname = 'chexpert-5x200'
+dataname = 'chexpert-5x200'
 # dataname = 'mimic-5x200'
 # dataname = 'covid'
-dataname = 'rsna'
+# dataname = 'rsna'
 
 df_sent = pd.read_csv('./local_data/sentence-label.csv', index_col=0)
 if dataname in ['chexpert-5x200', 'mimic-5x200']:
@@ -129,7 +130,8 @@ clf = MedClipPromptTuningClassifier(model,
                                     n_context=train_config['n_context'],
                                     class_specific_context=train_config['class_specific_context'],
                                     num_class=num_class,
-                                    mode=mode)
+                                    mode=mode,
+                                    joint_train_emb=train_config['joint_train_emb'])
 clf.cuda()
 for name, param in clf.named_parameters():
     if 'text_model.model.embeddings.word_embeddings' not in name:
