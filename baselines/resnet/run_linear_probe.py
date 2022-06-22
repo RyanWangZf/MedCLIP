@@ -41,10 +41,10 @@ train_config = {
 
 # uncomment the following block for experiments
 # dataname = 'chexpert-5x200'
-dataname = 'mimic-5x200'
+# dataname = 'mimic-5x200'
 # dataname = 'covid'
 # dataname = 'covid-2x200'
-# dataname = 'rsna-balanced'
+dataname = 'rsna-balanced'
 # dataname = 'rsna-2x200'
 
 if dataname in ['chexpert-5x200', 'mimic-5x200']:
@@ -122,6 +122,9 @@ class ResnetClassifier(nn.Module):
 
 # load the pretrained model and build the classifier
 clf = ResnetClassifier(num_class=num_class, mode=mode, pretrained=train_config['imagenet_weights'])
+for name, param in clf.named_parameters():
+    if name not in ['model.fc.weight', 'model.fc.bias']:
+        param.requires_grad = False
 
 # build dataloader
 transform = transforms.Compose([
