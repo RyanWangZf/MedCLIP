@@ -9,7 +9,7 @@ from torchvision import transforms
 from medclip import constants
 from medclip.dataset import SuperviseImageDataset, SuperviseImageCollator
 from medclip.evaluator import Evaluator
-from medclip.modeling_medclip import MedClipVisionModel, MedClipClassifier
+from medclip.modeling_medclip import MedClipVisionModel, MedClipVisionModelViT, MedClipClassifier
 from medclip.trainer import Trainer
 
 # set random seed
@@ -36,6 +36,9 @@ train_config = {
     'eval_steps': 50,
     'save_steps': 50,
 }
+
+# setup config
+vit = False
 
 # uncomment the following block for experiments
 # dataname = 'chexpert-5x200'
@@ -77,13 +80,22 @@ else:
     raise NotImplementedError
 
 # load the pretrained model and build the classifier
-vision_model = MedClipVisionModel(
-    medclip_checkpoint='/srv/local/data/MedCLIP/checkpoints/vision_text_pretrain/21000/'
-)
-clf = MedClipClassifier(vision_model,
-                        num_class=num_class,
-                        mode=mode,
-                        input_dim=512)
+if vit:
+    vision_model = MedClipVisionModelViT(
+        medclip_checkpoint='/srv/local/data/MedCLIP/checkpoints/vision_text_pretrain/25000/'
+    )
+    clf = MedClipClassifier(vision_model,
+                            num_class=num_class,
+                            mode=mode,
+                            input_dim=768)
+else:
+    vision_model = MedClipVisionModel(
+        medclip_checkpoint='/srv/local/data/MedCLIP/checkpoints/vision_text_pretrain/21000/'
+    )
+    clf = MedClipClassifier(vision_model,
+                            num_class=num_class,
+                            mode=mode,
+                            input_dim=512)
 clf.cuda()
 for name, param in clf.named_parameters():
     if name not in ['fc.weight', 'fc.bias']:
