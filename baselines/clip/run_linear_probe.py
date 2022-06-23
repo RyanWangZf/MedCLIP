@@ -1,15 +1,17 @@
 import os
 import random
+from collections import defaultdict
 
 import numpy as np
 import torch
+from torch import nn
 from torch.utils.data import DataLoader
 from torchvision import transforms
+from transformers import CLIPVisionModel
 
 from medclip import constants
 from medclip.dataset import SuperviseImageDataset, SuperviseImageCollator
 from medclip.evaluator import Evaluator
-from medclip.modeling_medclip import MedClipVisionModel, MedClipVisionModelViT, MedClipClassifier
 from medclip.trainer import Trainer
 
 # set random seed
@@ -19,10 +21,10 @@ np.random.seed(seed)
 torch.manual_seed(seed)
 torch.cuda.manual_seed(seed)
 os.environ['PYTHONASHSEED'] = str(seed)
-os.environ['TOKENIZERS_PARALLELISM'] = 'False'
+os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 
 # set cuda devices
-os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
 # setup training configurations
@@ -37,15 +39,12 @@ train_config = {
     'save_steps': 50,
 }
 
-# setup config
-vit = False
-
 # uncomment the following block for experiments
 # dataname = 'chexpert-5x200'
 # dataname = 'mimic-5x200'
-dataname = 'covid'
+# dataname = 'covid'
 # dataname = 'covid-2x200'
-# dataname = 'rsna-balanced'
+dataname = 'rsna-balanced'
 # dataname = 'rsna-2x200'
 
 if dataname in ['chexpert-5x200', 'mimic-5x200']:
@@ -79,24 +78,54 @@ elif dataname in ['rsna-balanced', 'rsna-2x200']:
 else:
     raise NotImplementedError
 
+
+class CLIPClassifier(nn.Module):
+    def __init__(self,
+                 vision_model,
+                 num_class=None,
+                 mode=None,
+                 ):
+        super().__init__()
+        self.num_class = num_class
+        self.mode = mode.lower()
+        input_dim = 768
+        if num_class > 2:
+            if mode == 'multiclass':
+                self.loss_fn = nn.CrossEntropyLoss()
+            else:
+                self.loss_fn = nn.BCEWithLogitsLoss()
+            self.fc = nn.Linear(input_dim, num_class)
+        else:
+            self.loss_fn = nn.BCEWithLogitsLoss()
+            self.fc = nn.Linear(input_dim, 1)
+        self.model = vision_model
+
+    def forward(self,
+                pixel_values,
+                labels=None,
+                return_loss=True,
+                **kwargs,
+                ):
+        outputs = defaultdict()
+        pixel_values = pixel_values.cuda()
+        # take embeddings before the projection head
+        img_embed = self.model(pixel_values).pooler_output
+        logits = self.fc(img_embed)
+        outputs['logits'] = logits
+        if labels is not None and return_loss:
+            labels = labels.cuda().float()
+            if len(labels.shape) == 1: labels = labels.view(-1, 1)
+            if self.mode == 'multiclass': labels = labels.flatten().long()
+            loss = self.loss_fn(logits, labels)
+            outputs['loss_value'] = loss
+        return outputs
+
+
 # load the pretrained model and build the classifier
-if vit:
-    vision_model = MedClipVisionModelViT(
-        medclip_checkpoint='/srv/local/data/MedCLIP/checkpoints/vision_text_pretrain/25000/'
-    )
-    clf = MedClipClassifier(vision_model,
-                            num_class=num_class,
-                            mode=mode,
-                            input_dim=768)
-else:
-    vision_model = MedClipVisionModel(
-        medclip_checkpoint='/srv/local/data/MedCLIP/checkpoints/vision_text_pretrain/21000/'
-    )
-    clf = MedClipClassifier(vision_model,
-                            num_class=num_class,
-                            mode=mode,
-                            input_dim=512)
+vision_model = CLIPVisionModel.from_pretrained("openai/clip-vit-base-patch32")
+clf = CLIPClassifier(vision_model=vision_model, num_class=num_class, mode=mode)
 clf.cuda()
+clf.eval()
 for name, param in clf.named_parameters():
     if name not in ['fc.weight', 'fc.bias']:
         param.requires_grad = False

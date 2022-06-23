@@ -2,7 +2,6 @@ import os
 import random
 from collections import defaultdict
 
-import gloria
 import numpy as np
 import pandas as pd
 import torch
@@ -10,10 +9,13 @@ from PIL import Image
 from torch import nn
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
+from transformers import CLIPTokenizer, CLIPModel
 
 from medclip import constants
 from medclip.evaluator import Evaluator
-from medclip.prompts import generate_class_prompts, generate_covid_class_prompts, generate_rsna_class_prompts
+from medclip.prompts import generate_class_prompts, generate_chexpert_class_prompts, generate_covid_class_prompts, \
+    generate_rsna_class_prompts
+from medclip.prompts import process_class_prompts
 
 # configuration
 seed = 42
@@ -28,15 +30,15 @@ device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
 # setup config
 n_runs = 5
-ensemble = True
+ensemble = False
 
 # uncomment the following block for experiments
 # dataname = 'chexpert-5x200'
 # dataname = 'mimic-5x200'
 # dataname = 'covid-test'
 # dataname = 'covid-2x200-test'
-# dataname = 'rsna-balanced-test'
-dataname = 'rsna-2x200-test'
+dataname = 'rsna-balanced-test'
+# dataname = 'rsna-2x200-test'
 
 
 class ZeroShotImageDataset(Dataset):
@@ -56,7 +58,7 @@ class ZeroShotImageDataset(Dataset):
             self.transform = transforms.Compose([
                 transforms.Resize((constants.IMG_SIZE, constants.IMG_SIZE)),
                 transforms.ToTensor(),
-                transforms.Normalize(mean=[0.5], std=[0.5])]
+                transforms.Normalize(mean=[0.5862785803043838], std=[0.27950088968644304])]
             )
         else:
             self.transform = imgtransform
@@ -94,12 +96,20 @@ class ZeroShotImageDataset(Dataset):
 
 
 class ZeroShotImageCollator:
-    def __init__(self, mode, prompt_texts_inputs=None):
+    def __init__(self, mode, cls_prompts=None, n_prompt=5):
         # initialize tokenizer
+        self.tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-base-patch32")
+        self.tokenizer.model_max_length = 77
         assert mode in ['multiclass', 'multilabel', 'binary']
         self.mode = mode
-        self.prompt_texts_inputs = prompt_texts_inputs
+
+        if cls_prompts is None:
+            raise NotImplementedError
+        else:
+            self.cls_prompts = cls_prompts
+
         # process cls prompts into texts indices
+        self.prompt_texts_inputs = process_class_prompts(self.cls_prompts)
 
     def __call__(self, batch):
         inputs = defaultdict(list)
@@ -122,8 +132,43 @@ class ZeroShotImageCollator:
         }
 
 
-class GloriaPromptClassifier(nn.Module):
-    def __init__(self, model, ensemble=True, **kwargs) -> None:
+class CLIP(nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        # load two encoders
+        self.model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
+
+    def forward(self,
+                input_ids=None,
+                pixel_values=None,
+                attention_mask=None,
+                **kwargs):
+        input_ids = input_ids.cuda()
+        attention_mask = attention_mask.cuda()
+        pixel_values = pixel_values.cuda()
+
+        # image encoding
+        img_embed = self.model.get_image_features(pixel_values)
+        img_embed = img_embed / img_embed.norm(dim=-1, keepdim=True)
+
+        # text encoding
+        text_embed = self.model.get_text_features(input_ids=input_ids, attention_mask=attention_mask)
+        text_embed = text_embed / text_embed.norm(dim=-1, keepdim=True)
+
+        logit_scale = self.model.logit_scale.exp()
+        logits_per_text = torch.matmul(text_embed, img_embed.t()) * logit_scale
+        logits = logits_per_text.T
+
+        outputs = {
+            'img_embeds': img_embed, 'text_embeds': text_embed,
+            'logits': logits, 'logits_per_text': logits.T, 'loss_value': None
+        }
+
+        return outputs
+
+
+class CLIPClassifier(nn.Module):
+    def __init__(self, model, ensemble=True):
         super().__init__()
         self.model = model
         self.ensemble = ensemble
@@ -133,41 +178,40 @@ class GloriaPromptClassifier(nn.Module):
         class_similarities = []
         class_names = []
         for cls_name, cls_text in prompt_inputs.items():
-            inputs = {'imgs': pixel_values}
-            for k in cls_text.keys():
-                if isinstance(cls_text[k], torch.Tensor):
-                    inputs[k] = cls_text[k].cuda()
-            img_emb_l, img_emb_g, text_emb_l, text_emb_g, sents = self.model(inputs)
-            global_similarities = self.model.get_global_similarities(img_emb_g, text_emb_g)
-            local_similarities = self.model.get_local_similarities(
-                img_emb_l, text_emb_l, cls_text["cap_lens"]
-            )
-            similarities = (local_similarities + global_similarities) / 2
+            inputs = {'pixel_values': pixel_values}
+            for k in cls_text.keys(): inputs[k] = cls_text[k].cuda()
+
+            medclip_outputs = self.model(**inputs)
+            logits = medclip_outputs['logits']
+
+            # take logits max as the class similarity
             if self.ensemble:
-                cls_sim = torch.mean(similarities, 1)  # equivalent to prompt ensembling
+                cls_sim = torch.mean(logits, 1)  # equivalent to prompt ensembling
             else:
-                cls_sim = torch.max(similarities, 1)[0]
+                cls_sim = torch.max(logits, 1)[0]
             class_similarities.append(cls_sim)
-        class_similarities = torch.stack(class_similarities, axis=1)
+            class_names.append(cls_name)
+
+        class_similarities = torch.stack(class_similarities, 1)
         outputs = {
             'logits': class_similarities,
+            'class_names': class_names,
         }
         return outputs
 
 
-gloria_model = gloria.load_gloria(device=device)
-gloria_model.eval()
+model = CLIP()
+model.cuda()
 
 df_sent = pd.read_csv('./local_data/sentence-label.csv', index_col=0)
 
 metrc_list = defaultdict(list)
 for i in range(n_runs):
     if dataname in ['chexpert-5x200', 'mimic-5x200']:
-        cls_prompts = gloria.generate_chexpert_class_prompts(n=10)
-        prompt_texts_inputs = gloria_model.process_class_prompts(cls_prompts, device)
+        cls_prompts = generate_chexpert_class_prompts(n=10)
         mode = 'multiclass'
         val_data = ZeroShotImageDataset([dataname], class_names=constants.CHEXPERT_COMPETITION_TASKS)
-        val_collate_fn = ZeroShotImageCollator(mode=mode, prompt_texts_inputs=prompt_texts_inputs)
+        val_collate_fn = ZeroShotImageCollator(mode=mode, cls_prompts=cls_prompts)
         eval_dataloader = DataLoader(
             val_data,
             batch_size=128,
@@ -176,7 +220,7 @@ for i in range(n_runs):
             pin_memory=False,
             num_workers=0,
         )
-        clf = GloriaPromptClassifier(gloria_model, ensemble=ensemble)
+        clf = CLIPClassifier(model, ensemble=ensemble)
         evaluator = Evaluator(
             medclip_clf=clf,
             eval_dataloader=eval_dataloader,
@@ -187,10 +231,9 @@ for i in range(n_runs):
         cls_prompts = generate_class_prompts(df_sent, ['No Finding'], n=10)
         covid_prompts = generate_covid_class_prompts(n=10)
         cls_prompts.update(covid_prompts)
-        prompt_texts_inputs = gloria_model.process_class_prompts(cls_prompts, device)
         mode = 'binary'
         val_data = ZeroShotImageDataset([dataname], class_names=constants.COVID_TASKS)
-        val_collate_fn = ZeroShotImageCollator(mode=mode, prompt_texts_inputs=prompt_texts_inputs)
+        val_collate_fn = ZeroShotImageCollator(mode=mode, cls_prompts=cls_prompts)
         eval_dataloader = DataLoader(
             val_data,
             batch_size=128,
@@ -199,7 +242,7 @@ for i in range(n_runs):
             pin_memory=False,
             num_workers=0,
         )
-        clf = GloriaPromptClassifier(gloria_model, ensemble=ensemble)
+        clf = CLIPClassifier(model, ensemble=ensemble)
         evaluator = Evaluator(
             medclip_clf=clf,
             eval_dataloader=eval_dataloader,
@@ -210,10 +253,9 @@ for i in range(n_runs):
         cls_prompts = generate_class_prompts(df_sent, ['No Finding'], n=10)
         rsna_prompts = generate_rsna_class_prompts(n=10)
         cls_prompts.update(rsna_prompts)
-        prompt_texts_inputs = gloria_model.process_class_prompts(cls_prompts, device)
         mode = 'binary'
         val_data = ZeroShotImageDataset([dataname], class_names=constants.RSNA_TASKS)
-        val_collate_fn = ZeroShotImageCollator(mode=mode, prompt_texts_inputs=prompt_texts_inputs)
+        val_collate_fn = ZeroShotImageCollator(mode=mode, cls_prompts=cls_prompts)
         eval_dataloader = DataLoader(
             val_data,
             batch_size=128,
@@ -222,7 +264,7 @@ for i in range(n_runs):
             pin_memory=False,
             num_workers=0,
         )
-        clf = GloriaPromptClassifier(gloria_model, ensemble=ensemble)
+        clf = CLIPClassifier(model, ensemble=ensemble)
         evaluator = Evaluator(
             medclip_clf=clf,
             eval_dataloader=eval_dataloader,

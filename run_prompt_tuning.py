@@ -31,23 +31,26 @@ device = "cuda:0" if torch.cuda.is_available() else "cpu"
 # setup training configurations
 train_config = {
     'batch_size': 64,
-    'num_epochs': 20,
+    'num_epochs': 10,
     'warmup': 0.1,  # the first 10% of training steps are used for warm-up
     'lr': 5e-4,
     'weight_decay': 0,
     'eval_batch_size': 256,
-    'eval_steps': 50,
-    'save_steps': 50,
+    'eval_steps': 10,
+    'save_steps': 10,
     'n_context': 16,  # number of context tokens for prompt tuning
     'class_specific_context': False,  # if true, each class will have a different set of context tokens,
-    'ensemble': True
+    'joint_train_emb': False,    # if true, the previous word embedings will be jointly trained
+    'ensemble': False,
 }
 
 # uncomment the following block for experiments
-dataname = 'chexpert-5x200'
+# dataname = 'chexpert-5x200'
 # dataname = 'mimic-5x200'
 # dataname = 'covid'
-# dataname = 'rsna'
+dataname = 'covid-2x200'
+# dataname = 'rsna-balanced'
+# dataname = 'rsna-2x200'
 
 df_sent = pd.read_csv('./local_data/sentence-label.csv', index_col=0)
 if dataname in ['chexpert-5x200', 'mimic-5x200']:
@@ -72,7 +75,16 @@ elif dataname == 'covid':
     cls_prompts = generate_class_prompts(df_sent, ['No Finding'], n=10)
     covid_prompts = generate_covid_class_prompts(n=10)
     cls_prompts.update(covid_prompts)
-elif dataname == 'rsna':
+elif dataname == 'covid-2x200':
+    tasks = constants.COVID_TASKS
+    num_class = 2
+    mode = 'binary'
+    train_dataname = f'{dataname}-train'
+    val_dataname = f'{dataname}-test'
+    cls_prompts = generate_class_prompts(df_sent, ['No Finding'], n=10)
+    covid_prompts = generate_covid_class_prompts(n=10)
+    cls_prompts.update(covid_prompts)
+elif dataname in ['rsna-balanced', 'rsna-2x200']:
     tasks = constants.RSNA_TASKS
     num_class = 2
     mode = 'binary'
@@ -129,7 +141,8 @@ clf = MedClipPromptTuningClassifier(model,
                                     n_context=train_config['n_context'],
                                     class_specific_context=train_config['class_specific_context'],
                                     num_class=num_class,
-                                    mode=mode)
+                                    mode=mode,
+                                    joint_train_emb=train_config['joint_train_emb'])
 clf.cuda()
 for name, param in clf.named_parameters():
     if 'text_model.model.embeddings.word_embeddings' not in name:

@@ -49,16 +49,18 @@ else:
 model.cuda()
 
 # uncomment the following block for experiments
-dataname = 'chexpert-5x200'
+# dataname = 'chexpert-5x200'
 # dataname = 'mimic-5x200'
 # dataname = 'covid-test'
+# dataname = 'covid-2x200-test'
 # dataname = 'rsna-balanced-test'
+dataname = 'rsna-2x200-test'
 
 if dataname in ['chexpert-5x200', 'mimic-5x200']:
     tasks = constants.CHEXPERT_COMPETITION_TASKS
-elif dataname == 'covid-test':
+elif dataname in ['covid-test', 'covid-2x200-test']:
     tasks = constants.COVID_TASKS
-elif dataname == 'rsna-balanced-test':
+elif dataname in ['rsna-balanced-test', 'rsna-2x200-test']:
     tasks = constants.RSNA_TASKS
 else:
     raise NotImplementedError
@@ -96,7 +98,7 @@ for i in range(n_runs):
             mode='multiclass',
         )
 
-    elif dataname == 'covid-test':
+    elif dataname in ['covid-test', 'covid-2x200-test']:
         cls_prompts = generate_class_prompts(df_sent, ['No Finding'], n=10)
         covid_prompts = generate_covid_class_prompts(n=10)
         cls_prompts.update(covid_prompts)
@@ -118,7 +120,7 @@ for i in range(n_runs):
             mode='binary',
         )
 
-    elif dataname == 'rsna-balanced-test':
+    elif dataname in ['rsna-balanced-test', 'rsna-2x200-test']:
         cls_prompts = generate_class_prompts(df_sent, ['No Finding'], n=10)
         rsna_prompts = generate_rsna_class_prompts(n=10)
         cls_prompts.update(rsna_prompts)

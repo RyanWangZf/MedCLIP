@@ -317,7 +317,8 @@ class PartiallyFixedEmbedding(nn.Module):
 class MedClipPromptTuningClassifier(nn.Module):
     '''take MedCLIP model with prompt tuning
     '''
-    def __init__(self, medclip_model, n_context, class_specific_context, num_class, mode, ensemble=True, **kwargs) -> None:
+    def __init__(self, medclip_model, n_context, class_specific_context, num_class, mode, ensemble=True,
+                 joint_train_emb=False, **kwargs) -> None:
         super().__init__()
         self.model = medclip_model
         self.ensemble = ensemble
@@ -333,10 +334,18 @@ class MedClipPromptTuningClassifier(nn.Module):
         # add embeddings for new tokens
         self.prev_n_tokens = self.model.text_model.model.embeddings.word_embeddings.num_embeddings
         self.prev_embeddings = copy.deepcopy(self.model.text_model.model.embeddings.word_embeddings.weight.data)
-        self.model.text_model.model.embeddings.word_embeddings = PartiallyFixedEmbedding(
-            fixed_weights=self.prev_embeddings,
-            num_to_learn=self.n_new_tokens
-        )
+        if not joint_train_emb:
+            self.model.text_model.model.embeddings.word_embeddings = PartiallyFixedEmbedding(
+                fixed_weights=self.prev_embeddings,
+                num_to_learn=self.n_new_tokens
+            )
+        else:
+            num_old = self.prev_n_tokens
+            num_new = self.n_new_tokens
+            dim = self.prev_embeddings.shape[1]
+            self.model.text_model.model.embeddings.word_embeddings = nn.Embedding(num_old + num_new, dim)
+            self.model.text_model.model.embeddings.word_embeddings.weight.data[:num_old] = self.prev_embeddings
+
         # set loss function
         assert mode.lower() in ['multiclass', 'multilabel', 'binary']
         if mode == 'multilabel':
