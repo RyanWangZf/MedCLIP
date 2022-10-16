@@ -165,3 +165,7 @@ RSNA_CLASS_PROMPTS = {
 }
 
 WEIGHTS_NAME = 'pytorch_model.bin'
+
+# store the URL of pretrained weights
+PRETRAINED_URL_MEDCLIP_RESNET = 'https://github.com/RyanWangZf/MedCLIP/raw/dev/medclip/medclip_resnet_weight.txt'
+PRETRAINED_URL_MEDCLIP_VIT = 'https://github.com/RyanWangZf/MedCLIP/raw/dev/medclip/medclip_vit_weight.txt'
