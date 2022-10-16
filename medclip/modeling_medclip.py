@@ -11,7 +11,7 @@ import torchvision
 
 from . import constants
 
-class MedClipTextModel(nn.Module):
+class MedCLIPTextModel(nn.Module):
     def __init__(self,
         bert_type=constants.BERT_TYPE,
         proj_dim = 512,
@@ -36,7 +36,7 @@ class MedClipTextModel(nn.Module):
         embed = self.projection_head(embed)
         return embed
 
-class MedClipVisionModel(nn.Module):
+class MedCLIPVisionModel(nn.Module):
     '''
     take resnet50 as backbone.
     '''
@@ -75,7 +75,7 @@ class MedClipVisionModel(nn.Module):
         img_embeds = self.model(pixel_values)
         return img_embeds
 
-class MedClipVisionModelViT(nn.Module):
+class MedCLIPVisionModelViT(nn.Module):
     '''take an VIT model as the backbone.
     '''
     def __init__(self, checkpoint=None, medclip_checkpoint=None) -> None:
@@ -120,17 +120,24 @@ class MedClipVisionModelViT(nn.Module):
             img_embeds = self.projection_head(img_embeds)
         return img_embeds
 
-class MedClipModel(nn.Module):
+class MedCLIPModel(nn.Module):
     def __init__(self,
-        vision_cls=MedClipVisionModel,
+        vision_cls=MedCLIPVisionModel,
         checkpoint=None,
         vision_checkpoint=None,
         logit_scale_init_value=0.07,
-        text_proj_bias = False
         ) -> None:
         super().__init__()
+
+        if vision_cls == MedCLIPVisionModel:
+            text_proj_bias = False
+        elif vision_cls == MedCLIPVisionModelViT:
+            text_proj_bias = True
+        else:
+            raise ValueError(f'Get unexpected `vision_cls` as {vision_cls}!')
+
         self.vision_model = vision_cls(checkpoint=vision_checkpoint)
-        self.text_model = MedClipTextModel(proj_bias=text_proj_bias)
+        self.text_model = MedCLIPTextModel(proj_bias=text_proj_bias)
 
         # learnable temperature for contrastive loss
         self.logit_scale = nn.Parameter(torch.log(torch.tensor(1/logit_scale_init_value)))
@@ -160,7 +167,7 @@ class MedClipModel(nn.Module):
         attention_mask=None,
         return_loss=None,
         **kwargs,
-    ):
+        ):
         input_ids = input_ids.cuda()
         if attention_mask is not None:
             attention_mask = attention_mask.cuda()
@@ -194,7 +201,7 @@ class MedClipModel(nn.Module):
     def contrastive_loss(self, logits: torch.Tensor) -> torch.Tensor:
         return nn.functional.cross_entropy(logits, torch.arange(len(logits), device=logits.device))
 
-class MedClipPromptClassifier(nn.Module):
+class PromptClassifier(nn.Module):
     '''take MedCLIP model with prompts for zero-shot classification
     '''
     def __init__(self, medclip_model, ensemble=False, **kwargs) -> None:
@@ -234,7 +241,7 @@ class MedClipPromptClassifier(nn.Module):
         }
         return outputs
 
-class MedClipClassifier(nn.Module):
+class SuperviseClassifier(nn.Module):
     '''take MedCLIP model with linear heads for supervised classification on images.
     '''
     def __init__(self,
@@ -312,7 +319,7 @@ class PartiallyFixedEmbedding(nn.Module):
                                        sparse=False)
 
 
-class MedClipPromptTuningClassifier(nn.Module):
+class PromptTuningClassifier(nn.Module):
     '''take MedCLIP model with prompt tuning
     '''
     def __init__(self, medclip_model, n_context, class_specific_context, num_class, mode, ensemble=True,
