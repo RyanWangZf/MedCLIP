@@ -14,15 +14,10 @@ from medclip.evaluator import Evaluator
 from medclip.modeling_medclip import MedClipModel, MedClipPromptClassifier, MedClipVisionModel, MedClipVisionModelViT
 from medclip.prompts import generate_class_prompts, generate_chexpert_class_prompts, generate_covid_class_prompts, \
     generate_rsna_class_prompts
+from medclip.utils import set_random_seed
 
 # set random seed
-seed = 42
-random.seed(seed)
-np.random.seed(seed)
-torch.manual_seed(seed)
-torch.cuda.manual_seed(seed)
-os.environ['PYTHONASHSEED'] = str(seed)
-os.environ['TOKENIZERS_PARALLELISM'] = 'False'
+set_random_seed(seed=42)
 
 # set device
 os.environ['CUDA_VISIBLE_DEVICES'] = '0'

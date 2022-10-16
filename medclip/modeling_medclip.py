@@ -1,5 +1,6 @@
 import pdb
 import os
+import copy
 from collections import defaultdict
 
 import torch
@@ -7,9 +8,6 @@ from torch import nn
 from transformers import AutoModel, AutoTokenizer
 import numpy as np
 import torchvision
-
-
-import copy
 
 from . import constants
 
