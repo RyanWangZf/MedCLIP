@@ -2,6 +2,7 @@ import pdb
 import os
 import copy
 from collections import defaultdict
+import requests
 
 import torch
 from torch import nn
@@ -146,6 +147,42 @@ class MedCLIPModel(nn.Module):
             state_dict = torch.load(os.path.join(checkpoint, constants.WEIGHTS_NAME))
             self.load_state_dict(state_dict)
             print('load model weight from:', checkpoint)
+
+    def from_pretrained(self, input_dir=None):
+        '''
+        If input_dir is None, download pretrained weight from google cloud and load.
+        '''
+        import wget
+        import zipfile
+        pretrained_url = None
+        if isinstance(self.vision_model, MedCLIPVisionModel):
+            # resnet
+            pretrained_url = constants.PRETRAINED_URL_MEDCLIP_RESNET
+        elif isinstance(self.vision_model, MedCLIPVisionModelViT):
+            # ViT
+            pretrained_url = constants.PRETRAINED_URL_MEDCLIP_VIT
+        else:
+            raise ValueError(f'We only have pretrained weight for MedCLIP-ViT or MedCLIP-ResNet, get {type(self.vision_model)} instead.')
+
+        if input_dir is None:
+            input_dir = './pretrained'
+
+        if not os.path.exists(input_dir):
+            os.makedirs(input_dir)
+
+            # download url link
+            pretrained_url = requests.get(pretrained_url).text
+            filename = wget.download(pretrained_url, input_dir)
+
+            # unzip
+            zipf = zipfile.ZipFile(filename)
+            zipf.extractall(input_dir)
+            zipf.close()
+            print('\n Download pretrained model from:', pretrained_url)
+        
+        state_dict = torch.load(os.path.join(input_dir, constants.WEIGHTS_NAME))
+        self.load_state_dict(state_dict)
+        print('load model weight from:', input_dir)
 
     def encode_text(self, input_ids=None, attention_mask=None):
         input_ids = input_ids.cuda()

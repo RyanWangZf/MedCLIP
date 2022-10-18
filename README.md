@@ -1,36 +1,18 @@
 # MedCLIP
 
+Wang, Zifeng and Wu, Zhenbang and Agarwal, Dinesh and Sun, Jimeng. (2022). MedCLIP: Contrastive Learning from Unpaired Medical Images and Texts. EMNLP'22.
 
 
-## Run vision-text pretraining
+## Three lines to get pretrained MedCLIP models
 
-```bash
-python run_medclip_pretrain.py
+```python
+from medclip import MedCLIPModel, MedCLIPVisionModelViT, MedCLIPVisionModel
+
+# load MedCLIP-ResNet50
+model = MedCLIPModel(vision_cls=MedCLIPVisionModel)
+model.from_pretrained()
+
+# load MedCLIP-ViT
+model = MedCLIPModel(vision_cls=MedCLIPVisionModelViT)
+model.from_pretrained()
 ```
-
-
-
-## Run zero-shot classification with prompts
-
-```bash
-python eval_zeroshot_classificaation.py
-```
-
-
-
-
-
-## Run linear probing
-
-```bash
-python run_linear_probe.py
-```
-
-
-
-## Run finetuning
-
-```bash
-python run_finetune.py
-```
-
