@@ -2,6 +2,18 @@
 
 Wang, Zifeng and Wu, Zhenbang and Agarwal, Dinesh and Sun, Jimeng. (2022). MedCLIP: Contrastive Learning from Unpaired Medical Images and Texts. EMNLP'22.
 
+## Download MedCLIP
+Before download MedCLIP, you need to find feasible torch version (with GPU) on https://pytorch.org/get-started/locally/.
+
+Then, download MedCLIP by
+
+```bash
+pip install git+https://github.com/RyanWangZf/MedCLIP.git
+
+# or
+
+pip install medclip
+```
 
 ## Three lines to get pretrained MedCLIP models
 
