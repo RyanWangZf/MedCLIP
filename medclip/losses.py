@@ -45,6 +45,7 @@ class ImageTextContrastiveLoss(nn.Module):
             logits = outputs['logits']
 
             # compute soft-labels, -1: negative, 0: uncertain, 1: positive
+            # in the original data: 1: positive, 0: negative, -1: uncertain, NA: not mentioned
             label_sim = torch.matmul(img_labels, text_labels.T)
             label_sim = label_sim.to(logits.device)
 
