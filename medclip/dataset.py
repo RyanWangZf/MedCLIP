@@ -17,7 +17,8 @@ from transformers.utils import TensorType
 from transformers.feature_extraction_utils import BatchFeature
 from transformers.image_utils import is_torch_tensor
 
-from nltk.tokenize import RegexpTokenizer
+# from nltk.tokenize import RegexpTokenizer
+import nltk
 from PIL import Image
 from sklearn.preprocessing import OrdinalEncoder
 
@@ -191,6 +192,7 @@ class ImageTextContrastiveDataset(Dataset):
     def __getitem__(self, index):
         row = self.df.iloc[index]
         img = Image.open(row.imgpath)
+
         img = self._pad_img(img) # pad image to square
         img = self.transform(img).unsqueeze(1)
         report = row.report # original sentences list
@@ -259,9 +261,11 @@ class ImageTextContrastiveDataset(Dataset):
             return []
         else:
             report = report.replace('\n',' ')
-            splitter = re.compile("[0-9]+\.")
+            # splitter = re.compile("[0-9]+\.")
+            splitter = re.compile("[0-9]+\.+[^0-9]")
             report = splitter.split(report)
-            reports = [point.split(".") for point in report]
+            reports = [point.split(". ") for point in report]
+            # reports = [point.split(".") for point in report]
             reports = [sent for point in reports for sent in point]
             study_sent = []
             for sent in reports:
@@ -269,8 +273,11 @@ class ImageTextContrastiveDataset(Dataset):
                     continue
 
                 sent = sent.replace("\ufffd\ufffd", " ")
-                tokenizer = RegexpTokenizer(r"\w+")
-                tokens = tokenizer.tokenize(sent.lower())
+                # tokenizer = RegexpTokenizer(r"\w+")
+                # tokens = tokenizer.tokenize(sent.lower())
+
+                tokens = tokens = nltk.wordpunct_tokenize(sent.lower())
+                
                 if len(tokens) <= 1:
                     continue
 
