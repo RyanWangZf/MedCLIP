@@ -1,6 +1,14 @@
 # MedCLIP
 
+[![PyPI version](https://badge.fury.io/py/medclip.svg)](https://badge.fury.io/py/medclip)
+[![Downloads](https://pepy.tech/badge/medclip)](https://pepy.tech/project/medclip)
+![GitHub Repo stars](https://img.shields.io/github/stars/ryanwangzf/medclip)
+![GitHub Repo forks](https://img.shields.io/github/forks/ryanwangzf/medclip)
+
+
 Wang, Zifeng and Wu, Zhenbang and Agarwal, Dinesh and Sun, Jimeng. (2022). MedCLIP: Contrastive Learning from Unpaired Medical Images and Texts. EMNLP'22.
+
+[Paper PDF](https://arxiv.org/pdf/2210.10163.pdf)
 
 ## Download MedCLIP
 Before download MedCLIP, you need to find feasible torch version (with GPU) on https://pytorch.org/get-started/locally/.
@@ -34,6 +42,7 @@ model.from_pretrained()
 ```python
 from medclip import MedCLIPModel, MedCLIPVisionModelViT
 from medclip import MedCLIPProcessor
+from PIL import Image
 
 # prepare for the demo image and texts
 processor = MedCLIPProcessor()
