@@ -13,10 +13,10 @@ with open(os.path.join(this_directory, 'requirements.txt'),
 
 setuptools.setup(
     name = 'MedCLIP',
-    version = '0.0.1',
+    version = '0.0.2',
     author = 'Zifeng Wang',
     author_email = 'zifengw2@illinois.edu',
-    description = 'EHR generation with prompt learning by language models.',
+    description = 'Contrastive Learning from Medical Images and Text.',
     url = 'https://github.com/RyanWangZf/MedCLIP',
     keywords=['vision-language model','X-ray','deep learning','AI','healthcare'],
     long_description=long_description,
