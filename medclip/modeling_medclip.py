@@ -32,9 +32,13 @@ class MedCLIPTextModel(nn.Module):
         # embed = last_hidden_states.permute(1,0,2,3)
         # embed = embed.mean(1).mean(1) # pooling
 
+        # get 1+2+last layer
+        last_hidden_states = torch.stack([output['hidden_states'][1], output['hidden_states'][2], output['hidden_states'][-1]]) # n_layer, batch, seqlen, emb_dim
+        embed = last_hidden_states.permute(1,0,2,3).mean(2).mean(1) # pooling
+
         # let's take only the last hidden layer
-        embed = output['pooler_output']
-        embed = self.projection_head(embed)
+        # embed = output['pooler_output']
+        # embed = self.projection_head(embed)
         return embed
 
 class MedCLIPVisionModel(nn.Module):
@@ -129,16 +133,11 @@ class MedCLIPModel(nn.Module):
         logit_scale_init_value=0.07,
         ) -> None:
         super().__init__()
-
-        if vision_cls == MedCLIPVisionModel:
-            text_proj_bias = False
-        elif vision_cls == MedCLIPVisionModelViT:
-            text_proj_bias = True
-        else:
-            raise ValueError(f'Get unexpected `vision_cls` as {vision_cls}!')
+        text_proj_bias = False
+        assert vision_cls in [MedCLIPVisionModel, MedCLIPVisionModelViT], 'vision_cls should be one of [MedCLIPVisionModel, MedCLIPVisionModelViT]'
 
         self.vision_model = vision_cls(checkpoint=vision_checkpoint)
-        self.text_model = MedCLIPTextModel(proj_bias=text_proj_bias)
+        self.text_model = MedCLIPTextModel(proj_bias=False)
 
         # learnable temperature for contrastive loss
         self.logit_scale = nn.Parameter(torch.log(torch.tensor(1/logit_scale_init_value)))
@@ -158,14 +157,15 @@ class MedCLIPModel(nn.Module):
         if isinstance(self.vision_model, MedCLIPVisionModel):
             # resnet
             pretrained_url = constants.PRETRAINED_URL_MEDCLIP_RESNET
+            if input_dir is None:
+                input_dir = './pretrained/medclip-resnet'
         elif isinstance(self.vision_model, MedCLIPVisionModelViT):
             # ViT
             pretrained_url = constants.PRETRAINED_URL_MEDCLIP_VIT
+            if input_dir is None:
+                input_dir = './pretrained/medclip-vit'
         else:
             raise ValueError(f'We only have pretrained weight for MedCLIP-ViT or MedCLIP-ResNet, get {type(self.vision_model)} instead.')
-
-        if input_dir is None:
-            input_dir = './pretrained'
 
         if not os.path.exists(input_dir):
             os.makedirs(input_dir)
