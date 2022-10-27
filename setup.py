@@ -13,7 +13,7 @@ with open(os.path.join(this_directory, 'requirements.txt'),
 
 setuptools.setup(
     name = 'MedCLIP',
-    version = '0.0.2',
+    version = '0.0.3',
     author = 'Zifeng Wang',
     author_email = 'zifengw2@illinois.edu',
     description = 'Contrastive Learning from Medical Images and Text.',

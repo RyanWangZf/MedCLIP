@@ -1,5 +1,5 @@
 name = 'MedCLIP'
-version = '0.0.2'
+version = '0.0.3'
 
 from .modeling_medclip import (
     MedCLIPTextModel, # text encoder
