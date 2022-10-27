@@ -38,7 +38,8 @@ class MedCLIPTextModel(nn.Module):
 
         # let's take only the last hidden layer
         # embed = output['pooler_output']
-        # embed = self.projection_head(embed)
+
+        embed = self.projection_head(embed)
         return embed
 
 class MedCLIPVisionModel(nn.Module):
