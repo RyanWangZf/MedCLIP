@@ -41,27 +41,45 @@ model.from_pretrained()
 
 ```python
 from medclip import MedCLIPModel, MedCLIPVisionModelViT
-from medclip import MedCLIPProcessor
+from medclip.processing import CLIPTokenizer
 from PIL import Image
+from torchvision.transforms import Compose, Resize, CenterCrop, ToTensor, Normalize
 
-# prepare for the demo image and texts
-processor = MedCLIPProcessor()
-image = Image.open('./example_data/view1_frontal.jpg')
+
+# instantiate CLIPTokenizer object
+tokenizer = CLIPTokenizer.from_pretrained('openai/clip-vit-base-patch32')
+
+# instantiate MedCLIPProcessor object
+processor = MedCLIPProcessor.from_pretrained('openai/clip-vit-base-patch32', image_size=224)
+
+# load demo image and apply transforms
+image = Image.open('/content/drive/MyDrive/RadiXClean/content/all_images/PMC107839_1471-2296-3-6-2.jpg').convert("RGB")
+image_transforms = Compose([
+    Resize(256, interpolation=3),
+    CenterCrop(224),
+    ToTensor()
+])
+image = image_transforms(image)
+image = Normalize(mean=[0.48145466, 0.4578275, 0.40821073],
+                  std=[0.26862954, 0.26130258, 0.27577711])(image)
+
+# prepare input for MedCLIP model
 inputs = processor(
     text=["lungs remain severely hyperinflated with upper lobe emphysema", 
-        "opacity left costophrenic angle is new since prior exam ___ represent some loculated fluid cavitation unlikely"], 
-    images=image, 
-    return_tensors="pt", 
-    padding=True
-    )
+          "opacity left costophrenic angle is new since prior exam ___ represent some loculated fluid cavitation unlikely"], 
+    images=image.unsqueeze(0), 
+    padding=True,
+    return_tensors="pt"
+)
 
-# pass to MedCLIP model
-model = MedCLIPModel(vision_cls=MedCLIPVisionModelViT)
-model.from_pretrained()
+# load pre-trained MedCLIP model and perform inference
+model = MedCLIPModel.from_pretrained('openai/clip-vit-base-patch32', tokenizer=tokenizer)
 model.cuda()
 outputs = model(**inputs)
+
 print(outputs.keys())
 # dict_keys(['img_embeds', 'text_embeds', 'logits', 'loss_value', 'logits_per_text'])
+
 ```
 
 ## MedCLIP for Prompt-based Classification
