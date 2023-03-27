@@ -31,7 +31,7 @@ class Evaluator:
     
     def evaluate(self, eval_dataloader=None):
         self.clf.eval()
-        if self.eval_dataloader is None and eval_dataloader is not None: eval_dataloader = eval_dataloader
+        if self.eval_dataloader is None and eval_dataloader is not None: self.eval_dataloader = eval_dataloader
         else: eval_dataloader = self.eval_dataloader
         pred_list = []
         label_list = []
