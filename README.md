@@ -93,3 +93,7 @@ print(output)
 # {'logits': tensor([[0.5154, 0.4119, 0.2831, 0.2441, 0.4588]], device='cuda:0',
 #       grad_fn=<StackBackward0>), 'class_names': ['Atelectasis', 'Cardiomegaly', 'Consolidation', 'Edema', 'Pleural Effusion']}
 ```
+
+## How to Get Sentence-level Semantic Labels
+
+You can refer to https://github.com/stanfordmlgroup/chexpert-labeler where wonderful information extraction tools are offered!
