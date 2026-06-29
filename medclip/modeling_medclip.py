@@ -12,74 +12,64 @@ import torchvision
 
 from . import constants
 
+# --- HÀM HỖ TRỢ LẤY THIẾT BỊ ---
+def get_device(module):
+    return next(module.parameters()).device
+
 class MedCLIPTextModel(nn.Module):
-    def __init__(self,
-        bert_type=constants.BERT_TYPE,
-        proj_dim = 512,
-        proj_bias = False) -> None:
+    def __init__(self, bert_type=constants.BERT_TYPE, proj_dim=512, proj_bias=False) -> None:
         super().__init__()
         self.bert_type = bert_type
         self.last_n_layer = 4
         self.model = AutoModel.from_pretrained(self.bert_type, output_hidden_states=True)
-        # this tokenizer is actually not used
         self.tokenizer = AutoTokenizer.from_pretrained(self.bert_type)
         self.projection_head = nn.Linear(768, proj_dim, bias=proj_bias)
 
     def forward(self, input_ids, attention_mask):
         output = self.model(input_ids=input_ids, attention_mask=attention_mask)
-        # take the average of last four layers
-        # last_hidden_states = torch.stack(output['hidden_states'][-self.last_n_layer:]) # n_layer, batch, seqlen, emb_dim
-        # embed = last_hidden_states.permute(1,0,2,3)
-        # embed = embed.mean(1).mean(1) # pooling
-
-        # get 1+2+last layer
-        last_hidden_states = torch.stack([output['hidden_states'][1], output['hidden_states'][2], output['hidden_states'][-1]]) # n_layer, batch, seqlen, emb_dim
-        embed = last_hidden_states.permute(1,0,2,3).mean(2).mean(1) # pooling
-
-        # let's take only the last hidden layer
-        # embed = output['pooler_output']
-
+        last_hidden_states = torch.stack([output['hidden_states'][1], output['hidden_states'][2], output['hidden_states'][-1]])
+        embed = last_hidden_states.permute(1,0,2,3).mean(2).mean(1)
         embed = self.projection_head(embed)
         return embed
 
 class MedCLIPVisionModel(nn.Module):
-    '''
-    take resnet50 as backbone.
-    '''
     def __init__(self, checkpoint=None, medclip_checkpoint=None):
         super().__init__()
-        self.model = torchvision.models.resnet50(pretrained=True)
+        # Sửa lỗi: dùng weights='DEFAULT' thay cho pretrained=True
+        self.model = torchvision.models.resnet50(weights='DEFAULT')
         num_fts = self.model.fc.in_features
-        self.model.fc = nn.Linear(num_fts, 512, bias=False) # projection head
+        self.model.fc = nn.Linear(num_fts, 512, bias=False)
         if checkpoint is not None:
-            state_dict = torch.load(os.path.join(checkpoint, constants.WEIGHTS_NAME))
-            missing_keys, unexpected_keys = self.load_state_dict(state_dict, strict=False)
-            print('missing keys:', missing_keys)
-            print('unexpected keys:', unexpected_keys)
-            print('load model weight from:', checkpoint)
+            state_dict = torch.load(os.path.join(checkpoint, constants.WEIGHTS_NAME), map_location='cpu')
+            self.load_state_dict(state_dict, strict=False)
         if medclip_checkpoint is not None:
             self.load_from_medclip(medclip_checkpoint)
 
     def load_from_medclip(self, checkpoint):
-        '''handle key mismatch of medclip and the vision encoder.
-        '''
-        state_dict = torch.load(os.path.join(checkpoint, constants.WEIGHTS_NAME))
-        new_state_dict = {}
-        for key in state_dict.keys():
-            if 'vision_model' in key:
-                new_state_dict[key.replace('vision_model.','')] = state_dict[key]
-        missing_keys, unexpected_keys = self.load_state_dict(new_state_dict, strict=False)
-        print('missing keys:', missing_keys)
-        print('unexpected keys:', unexpected_keys)
-        print('load model weight from:', checkpoint)
+        state_dict = torch.load(os.path.join(checkpoint, constants.WEIGHTS_NAME), map_location='cpu')
+        new_state_dict = {key.replace('vision_model.',''): val for key, val in state_dict.items() if 'vision_model' in key}
+        self.load_state_dict(new_state_dict, strict=False)
 
     def forward(self, pixel_values, **kwargs):
-        '''args:
-        pixel_values: tensor with shape [bs, 3, img_size, img_size]
-        '''
         if pixel_values.shape[1] == 1: pixel_values = pixel_values.repeat((1,3,1,1))
-        img_embeds = self.model(pixel_values)
-        return img_embeds
+        return self.model(pixel_values)
+
+    def encode_text(self, input_ids=None, attention_mask=None):
+        device = get_device(self)
+        input_ids = input_ids.to(device)
+        if attention_mask is not None:
+            attention_mask = attention_mask.to(device)
+        text_embeds = self.text_model(input_ids, attention_mask)
+        return text_embeds / text_embeds.norm(dim=-1, keepdim=True)
+
+    def forward(self, input_ids=None, pixel_values=None, attention_mask=None, return_loss=None, **kwargs):
+        device = get_device(self)
+        input_ids = input_ids.to(device)
+        if attention_mask is not None: attention_mask = attention_mask.to(device)
+        pixel_values = pixel_values.to(device)
+        
+        img_embeds = self.encode_image(pixel_values)
+        text_embeds = self.encode_text(input_ids, attention_mask)
 
 class MedCLIPVisionModelViT(nn.Module):
     '''take an VIT model as the backbone.

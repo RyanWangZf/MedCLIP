@@ -1,3 +1,10 @@
+import numpy as np
+
+# Patch lỗi tương thích Numpy >= 1.24
+if not hasattr(np, 'float'): np.float = float
+if not hasattr(np, 'int'): np.int = int
+if not hasattr(np, 'bool'): np.bool = bool
+if not hasattr(np, 'object'): np.object = object
 name = 'MedCLIP'
 version = '0.0.3'
 
